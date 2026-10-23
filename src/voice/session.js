@@ -5,18 +5,76 @@ import {
   createAudioResource,
 } from '@discordjs/voice';
 import { Readable } from 'node:stream';
+import { get as httpsGet } from 'node:https';
 
 const MUSIC_VOLUME_DEFAULT = 0.45;
-const ANNOUNCE_DUCK = 0.25;
 
 function clampVolume(value) {
   return Math.min(1, Math.max(0.05, value));
 }
 
-async function streamFromUrl(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Не удалось открыть поток трека: ${res.status}`);
-  return Readable.fromWeb(res.body);
+async function trackResource(url, volume) {
+  const buffer = await downloadTrack(url);
+  const resource = createAudioResource(Readable.from(buffer), {
+    inputType: StreamType.Arbitrary,
+    inlineVolume: true,
+  });
+  resource.volume?.setVolume(volume);
+  return resource;
+}
+
+function downloadTrack(rawUrl, depth = 5) {
+  if (depth <= 0) return Promise.reject(new Error('Слишком много редиректов'));
+  return new Promise((resolve, reject) => {
+    const req = httpsGet(rawUrl, (res) => {
+      const code = res.statusCode ?? 0;
+      if ([301, 302, 303, 307, 308].includes(code) && res.headers.location) {
+        res.resume();
+        const next = new URL(res.headers.location, rawUrl).toString();
+        downloadTrack(next, depth - 1).then(resolve, reject);
+        return;
+      }
+      if (code !== 200 && code !== 206) {
+        res.resume();
+        reject(new Error(`Поток трека: HTTP ${code}`));
+        return;
+      }
+      const chunks = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        const buffer = Buffer.concat(chunks);
+        if (!buffer.length) reject(new Error('Пустой трек'));
+        else resolve(buffer);
+      });
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(60_000, () => {
+      req.destroy(new Error('Загрузка трека зависла'));
+    });
+  });
+}
+
+async function ttsResource(text, apiKey, voice) {
+  const res = await fetch('https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize', {
+    method: 'POST',
+    headers: {
+      Authorization: `Api-Key ${apiKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      text,
+      voice,
+      lang: 'ru-RU',
+      format: 'oggopus',
+      sampleRateHertz: '48000',
+      emotion: 'neutral',
+    }),
+  });
+  if (!res.ok) throw new Error(`TTS ${res.status}: ${await res.text()}`);
+  return createAudioResource(Readable.fromWeb(res.body), {
+    inputType: StreamType.OggOpus,
+  });
 }
 
 export class VoiceSession {
@@ -26,113 +84,99 @@ export class VoiceSession {
     this.queue = [];
     this.current = null;
 
-    this.musicPlayer = createAudioPlayer();
-    this.voicePlayer = createAudioPlayer();
-    connection.subscribe(this.musicPlayer);
-    connection.subscribe(this.voicePlayer);
+    this.player = createAudioPlayer();
+    connection.subscribe(this.player);
 
+    this.player.on(AudioPlayerStatus.Idle, () => {
+      this.current = null;
+      const next = this.queue.shift();
+      if (next) this.start(next);
+    });
+    this.player.on('error', (err) => console.error('Плеер:', err.message));
+    this.player.on('stateChange', (oldState, newState) => {
+      if (oldState.status !== newState.status) {
+        console.log(`[player] ${oldState.status} -> ${newState.status}`);
+      }
+    });
     this.connection.on('stateChange', (oldState, newState) => {
       if (oldState.status !== newState.status) {
         console.log(`[voice] ${oldState.status} -> ${newState.status}`);
       }
     });
-    this.musicPlayer.on(AudioPlayerStatus.Idle, () => {
-      this.current = null;
-      this.playNext();
-    });
-    this.musicPlayer.on('error', (err) => console.error('Плеер музыки:', err.message));
-    this.musicPlayer.on('stateChange', (oldState, newState) => {
-      if (oldState.status !== newState.status) {
-        console.log(`[player] ${oldState.status} -> ${newState.status}`);
-      }
-    });
-    this.voicePlayer.on('error', (err) => console.error('Плеер озвучки:', err.message));
+    this.probe = setInterval(() => {
+      console.log(
+        `[probe] conn=${this.connection.state.status} subs=${this.player.subscribers.length} player=${this.player.state.status}`,
+      );
+    }, 1000);
   }
 
-  playNext() {
+  startNext() {
+    if (this.player.state.status !== AudioPlayerStatus.Idle) return;
     const next = this.queue.shift();
-    if (next) this.startTrack(next);
+    if (next) this.start(next);
   }
 
-  async startTrack(item) {
+  async start(item) {
     try {
-      const stream = await streamFromUrl(item.url);
-      const resource = createAudioResource(stream, {
-        inputType: StreamType.Arbitrary,
-        inlineVolume: true,
-      });
-      resource.volume.setVolume(this.musicVolume);
-      this.current = resource;
-      this.musicPlayer.play(resource);
+      const resource = item.kind === 'tts'
+        ? await ttsResource(item.text, item.apiKey, item.voice)
+        : await trackResource(item.url, this.musicVolume);
+      if (this.player.state.status !== AudioPlayerStatus.Idle) {
+        try {
+          resource.playStream.destroy();
+        } catch {
+        }
+        return;
+      }
+      this.current = item;
+      this.currentResource = resource;
+      this.player.play(resource);
     } catch (err) {
-      console.error('Не удалось запустить трек:', err.message);
-      this.playNext();
+      console.error('Не удалось запустить элемент очереди:', err.message);
+      this.startNext();
     }
   }
 
   async playTrack(item) {
     this.queue.push(item);
-    if (this.musicPlayer.state.status !== AudioPlayerStatus.Playing && !this.current) {
-      this.playNext();
-    }
+    this.startNext();
     return item;
   }
 
+  async speakText(text, { apiKey, voice }) {
+    const item = { kind: 'tts', text, apiKey, voice };
+    const status = this.player.state.status;
+    if (status === AudioPlayerStatus.Idle) {
+      this.queue.unshift(item);
+      this.startNext();
+      return;
+    }
+    const resume = this.current && this.current.kind === 'track' ? this.current : null;
+    this.queue = [item, ...(resume ? [resume] : []), ...this.queue];
+    this.player.stop(true);
+  }
+
   skip() {
-    if (this.musicPlayer.state.status !== AudioPlayerStatus.Idle || this.current) {
-      this.musicPlayer.stop(true);
+    if (this.current || this.player.state.status !== AudioPlayerStatus.Idle) {
+      this.player.stop(true);
     }
   }
 
   stopPlaying() {
-    this.queue = [];
+    this.queue = this.queue.filter((item) => item.kind === 'tts');
     this.current = null;
-    this.musicPlayer.stop(true);
+    this.player.stop(true);
   }
 
   changeVolume(delta) {
     this.musicVolume = clampVolume(this.musicVolume + delta);
-    this.current?.volume?.setVolume(this.musicVolume);
+    if (this.current?.kind === 'track') {
+      this.currentResource?.volume?.setVolume(this.musicVolume);
+    }
     return this.musicVolume;
   }
 
-  async speakText(text, { apiKey, voice }) {
-    const res = await fetch('https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize', {
-      method: 'POST',
-      headers: {
-        Authorization: `Api-Key ${apiKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        text,
-        voice,
-        lang: 'ru-RU',
-        format: 'oggopus',
-        sampleRateHertz: '48000',
-        emotion: 'neutral',
-      }),
-    });
-    if (!res.ok) throw new Error(`TTS ${res.status}: ${await res.text()}`);
-
-    const resource = createAudioResource(Readable.fromWeb(res.body), {
-      inputType: StreamType.OggOpus,
-    });
-
-    const wasPlaying = this.musicPlayer.state.status === AudioPlayerStatus.Playing;
-    if (wasPlaying) {
-      this.current?.volume?.setVolume(this.musicVolume * ANNOUNCE_DUCK);
-    }
-
-    this.voicePlayer.play(resource);
-    await new Promise((resolve) => {
-      const onIdle = () => {
-        this.voicePlayer.off(AudioPlayerStatus.Idle, onIdle);
-        if (wasPlaying) {
-          this.current?.volume?.setVolume(this.musicVolume);
-        }
-        resolve();
-      };
-      this.voicePlayer.on(AudioPlayerStatus.Idle, onIdle);
-    });
+  destroy() {
+    clearInterval(this.probe);
   }
 }

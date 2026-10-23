@@ -80,6 +80,7 @@ function getSession(guild, channel) {
 function destroySession(guildId) {
   const record = sessions.get(guildId);
   if (!record) return;
+  record.session.destroy();
   record.listener.stop();
   record.connection.destroy();
   sessions.delete(guildId);

@@ -140,7 +140,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
         getSession(interaction.guild, voiceChannel);
-        await interaction.reply(`Села в «${voiceChannel.name}». Скажи «Алиса, включи...» или задай вопрос`);
+        await interaction.reply(`Села в «${voiceChannel.name}».`);
         break;
       }
       case 'leave': {

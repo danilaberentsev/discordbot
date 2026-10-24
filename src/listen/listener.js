@@ -1,6 +1,8 @@
 import { EndBehaviorType } from '@discordjs/voice';
 import { opus } from 'prism-media';
-import { SpeechKitSession } from '../stt/session.js';
+import { recognizePcm } from '../stt/session.js';
+
+const MAX_UTTERANCE_BYTES = 48000 * 2 * 55;
 
 export class VoiceListener {
   constructor(connection, botId, { apiKey, language, sampleRate, onUtterance } = {}) {
@@ -11,6 +13,7 @@ export class VoiceListener {
     this.sampleRate = sampleRate ?? 48000;
     this.onUtterance = onUtterance ?? null;
     this.users = new Map();
+    this.busy = new Set();
     this.speaking = connection.receiver.speaking;
     this.handleStart = null;
     this.handleStop = null;
@@ -38,25 +41,16 @@ export class VoiceListener {
 
   beginUser(userId) {
     if (userId === this.botId || this.users.has(userId)) return;
-    const entry = { sub: null, dec: null, sess: null, timer: null };
+    const entry = { sub: null, dec: null, chunks: [], bytes: 0 };
     this.users.set(userId, entry);
 
     if (!this.apiKey) {
       console.log('Речь замечена, но YANDEX_CLOUD_API_KEY не задан, распознавание выключено');
       return;
     }
+    if (this.busy.has(userId)) return;
 
     try {
-      const session = new SpeechKitSession(this.apiKey, {
-        language: this.language,
-        sampleRate: this.sampleRate,
-      });
-      session.on('partial', (text) => console.log(`partial: ${text}`));
-      session.on('final', (text) => {
-        if (text) this.onUtterance?.(text, userId);
-      });
-      session.on('error', (err) => console.error('STT:', err.message));
-
       const sub = this.connection.receiver.subscribe(userId, {
         end: { behavior: EndBehaviorType.AfterSilence, duration: 700 },
       });
@@ -65,29 +59,23 @@ export class VoiceListener {
         channels: 1,
         rate: this.sampleRate,
       });
-      decoder.on('data', (chunk) => session.write(chunk));
+      decoder.on('data', (chunk) => {
+        entry.chunks.push(chunk);
+        entry.bytes += chunk.length;
+      });
       sub.pipe(decoder);
 
       entry.sub = sub;
       entry.dec = decoder;
-      entry.sess = session;
     } catch (err) {
-      console.error('Не удалось начать распознавание:', err);
+      console.error('Не удалось начать запись фразы:', err);
     }
   }
 
   endUser(userId) {
     const entry = this.users.get(userId);
     if (!entry) return;
-    entry.sess?.end();
-    clearTimeout(entry.timer);
-    entry.timer = setTimeout(() => this.closeUser(userId), 3000);
-  }
-
-  closeUser(userId) {
-    const entry = this.users.get(userId);
-    if (!entry) return;
-    clearTimeout(entry.timer);
+    const pcm = Buffer.concat(entry.chunks);
     try {
       entry.sub?.destroy();
     } catch {
@@ -96,10 +84,26 @@ export class VoiceListener {
       entry.dec?.destroy();
     } catch {
     }
-    try {
-      entry.sess?.close();
-    } catch {
-    }
+    this.users.delete(userId);
+
+    if (pcm.length < this.sampleRate * 2 * 0.3) return;
+    if (this.busy.has(userId)) return;
+    this.busy.add(userId);
+    const text = recognizePcm(this.apiKey, pcm, {
+      language: this.language,
+      sampleRate: this.sampleRate,
+    });
+    text.then((value) => {
+      if (value) {
+        console.log(`Услышала (${userId}): ${value}`);
+        this.onUtterance?.(value, userId);
+      }
+    }).catch((err) => console.error('STT:', err.message)).finally(() => {
+      this.busy.delete(userId);
+    });
+  }
+
+  closeUser(userId) {
     this.users.delete(userId);
   }
 }

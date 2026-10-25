@@ -31,7 +31,9 @@ function bufferStream(buffer, start, onProgress) {
 }
 
 async function trackResource(item, volume) {
-  if (!item.buffer) item.buffer = await downloadTrack(item.url);
+  let url = item.url;
+  if (typeof url === 'function') url = await url();
+  if (!item.buffer) item.buffer = await downloadTrack(url);
   const stream = bufferStream(item.buffer, item.offset ?? 0, (bytes) => {
     item.offset = bytes;
   });
@@ -106,6 +108,7 @@ export class VoiceSession {
     this.musicVolume = MUSIC_VOLUME_DEFAULT;
     this.queue = [];
     this.current = null;
+    this.starting = false;
 
     this.player = createAudioPlayer();
     connection.subscribe(this.player);
@@ -134,12 +137,15 @@ export class VoiceSession {
   }
 
   startNext() {
+    if (this.starting) return;
     if (this.player.state.status !== AudioPlayerStatus.Idle) return;
     const next = this.queue.shift();
     if (next) this.start(next);
   }
 
   async start(item) {
+    this.starting = true;
+    let started = false;
     try {
       const resource = item.kind === 'tts'
         ? await ttsResource(item.text, item.apiKey, item.voice)
@@ -154,10 +160,13 @@ export class VoiceSession {
       this.current = item;
       this.currentResource = resource;
       this.player.play(resource);
+      started = true;
     } catch (err) {
       console.error('Не удалось запустить элемент очереди:', err.message);
-      this.startNext();
+    } finally {
+      this.starting = false;
     }
+    if (!started) this.startNext();
   }
 
   async playTrack(item) {

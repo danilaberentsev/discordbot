@@ -1,11 +1,12 @@
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
-import { cleanQuery } from './parse.js';
+import { cleanQuery, isWaveIntent } from './parse.js';
 import { scoreTrack, tokenize } from './score.js';
 
-const WAVE_QUERY = 'главные хиты';
 const CANDIDATE_SCORE_THRESHOLD = 30;
 const LIKES_WEIGHT = 5;
+const WAVE_QUEUE_SIZE = 10;
+const WAVE_TOP = 50;
 
 function defaultFixer(query) {
   if (process.env.YANDEX_CLOUD_API_KEY && process.env.YANDEXGPT_FOLDER_ID) {
@@ -39,13 +40,13 @@ export async function runMusicCommand(session, music, cmd) {
 
 export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (!music) throw new Error('YANDEX_MUSIC_TOKEN не настроен');
-  const wave = !query || query === '__wave__' || query.includes('моя волна');
-  const actualQuery = wave ? WAVE_QUERY : cleanQuery(query);
+  const wave = !query || query === '__wave__' || query.includes('моя волна') || isWaveIntent(cleanQuery(query));
+  if (wave) return playWave(session, music);
 
-  const primary = await pickTrack(music, actualQuery, wave);
-  if (wave && !primary) return `Ничего не нашла для «${actualQuery}»`;
+  const actualQuery = cleanQuery(query);
+  const primary = await pickTrack(music, actualQuery);
 
-  if (!wave && (!primary || primary.score < CANDIDATE_SCORE_THRESHOLD) && /[a-zа-яё]/i.test(actualQuery)) {
+  if ((!primary || primary.score < CANDIDATE_SCORE_THRESHOLD) && /[a-zа-яё]/i.test(actualQuery)) {
     const candidateQueries = new Set();
     if (fixer) {
       try {
@@ -58,7 +59,7 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
     for (const candidate of translitFallbacks(actualQuery)) candidateQueries.add(candidate);
 
     const alts = primary ? [primary] : [];
-    const settled = await Promise.allSettled([...candidateQueries].map((c) => pickTrack(music, c, false)));
+    const settled = await Promise.allSettled([...candidateQueries].map((c) => pickTrack(music, c)));
     for (const result of settled) {
       if (result.status === 'fulfilled' && result.value) alts.push(result.value);
     }
@@ -74,6 +75,26 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
     return startPicked(session, music, winner);
   }
   return startPicked(session, music, primary);
+}
+
+function sampleTracks(tracks, count) {
+  const pool = [...tracks];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, count);
+}
+
+async function playWave(session, music) {
+  const chart = await music.chart(WAVE_TOP);
+  if (!chart.length) return 'Ничего не нашла в чарте';
+  const picks = sampleTracks(chart, WAVE_QUEUE_SIZE);
+  for (const track of picks) {
+    session.playTrack({ title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
+  }
+  console.log(`Волна: в очереди ${picks.length} популярных треков`);
+  return `Включаю: ${picks.length} популярных треков`;
 }
 
 async function albumLikes(music, albumId, cache) {
@@ -97,7 +118,7 @@ async function startPicked(session, music, candidate) {
   return `Включаю: ${label}`;
 }
 
-async function pickTrack(music, query, wave) {
+async function pickTrack(music, query) {
   let searchQuery = query;
   let { best, tracks } = await music.searchAll(searchQuery);
   console.log(`Поиск «${searchQuery}»: треков ${tracks.length}, best ${best ? best.type : 'null'}`);
@@ -111,9 +132,7 @@ async function pickTrack(music, query, wave) {
   if (!tracks.length && !best) return null;
 
   let picked;
-  if (wave) {
-    picked = tracks[Math.floor(Math.random() * tracks.length)];
-  } else if (best?.type === 'album' && best.result?.id) {
+  if (best?.type === 'album' && best.result?.id) {
     const album = await music.albumTracks(best.result.id);
     console.log(`Взят best-альбом «${best.result.title}» (${album.length} треков)`);
     const scored = album.map((t) => ({ t, s: scoreTrack(t, query) }));
@@ -134,6 +153,6 @@ async function pickTrack(music, query, wave) {
   }
 
   if (!picked) return null;
-  const score = wave ? 100 : scoreTrack(picked, query);
+  const score = scoreTrack(picked, query);
   return { query, picked, score };
 }

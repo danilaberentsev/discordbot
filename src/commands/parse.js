@@ -20,12 +20,27 @@ const FILLER_WORDS = new Set([
   'мне', 'нам', 'пожалуйста', 'плиз',
   'песню', 'песенку', 'трек', 'треки', 'музыку',
   'давай', 'ну', 'вот', 'это', 'эту', 'этот',
+  'просто', 'любую', 'любой', 'любая',
 ]);
 
+// «просто музыка» без конкретного названия: слова, означающие generic-интент
+const WAVE_WORDS = new Set([
+  'музыку', 'музыка', 'музыки',
+  'песню', 'песня', 'песенку',
+  'трек', 'треки',
+  'что-нибудь', 'чтонибудь', 'что-то', 'чтото',
+  'популярное', 'популярную', 'популярный', 'популярная', 'популярные',
+  'хит', 'хиты', 'хитов', 'топ', 'чарт', 'плейлист', 'подборку', 'подборка',
+]);
+
+export function isWaveIntent(q) {
+  if (!q) return true;
+  return q.split(' ').every((t) => WAVE_WORDS.has(t));
+}
+
 export function cleanQuery(text) {
-  const norm = normalize(text);
-  const tokens = norm.split(' ').filter((t) => !FILLER_WORDS.has(t));
-  return tokens.join(' ').trim() || norm.trim();
+  const tokens = normalize(text).split(' ').filter((t) => !FILLER_WORDS.has(t));
+  return tokens.join(' ').trim();
 }
 
 const SPACEGLIDE_QUERY = 'unlike pluto everything black';
@@ -67,10 +82,14 @@ export function parseCommand(text) {
   }
   if (/^(тише|потише)$/.test(t)) return { action: 'volume', delta: -0.15 };
   if (/^(громче|погромче)$/.test(t)) return { action: 'volume', delta: 0.15 };
-  if (t === 'моя волна' || t === 'радио' || t === 'музыку' || t === 'музыка') {
+  if (t === 'моя волна' || t === 'радио' || isWaveIntent(t)) {
     return { action: 'play', query: '__wave__' };
   }
   const play = t.match(/^(?:хочу\s+)?(?:послушать|слушать|послушай|включить|включи|запустить|запусти|поставь|поставить|играй|сыграй)\s+(.+)$/);
-  if (play) return { action: 'play', query: cleanQuery(play[1]) };
+  if (play) {
+    const q = cleanQuery(play[1]);
+    if (isWaveIntent(q)) return { action: 'play', query: '__wave__' };
+    return { action: 'play', query: q };
+  }
   return { action: 'assistant', text: t };
 }

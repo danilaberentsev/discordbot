@@ -59,10 +59,10 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/stt/v3.js` — `recognizePcmV3`, gRPC-стриминг SpeechKit v3 (LPCM → `final`/`partial` текст).
 - `src/stt/proto/` — proto-файлы SpeechKit v3 (полный `stt.proto` из cloudapi + урезанный `stt_service.proto`).
 - `src/tts/synthesize.js` — `speakUma(session, text)`, проверяет наличие ключа.
-- `src/music/client.js` — `searchAll` (type=all, нормализует треки), `albumTracks`, `normalizeTrack`, `playableUrl`.
-- `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `stripWake`, `parseCommand`.
+- `src/music/client.js` — `searchAll` (type=all, нормализует треки), `chart` (топ-чарт), `albumTracks`, `normalizeTrack`, `playableUrl`.
+- `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `isWaveIntent`, `stripWake`, `parseCommand`.
 - `src/commands/score.js` — `scoreTrack`, `tokenize`, `levenshtein` (word-boundary + fuzzy).
-- `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, выбор трека из кандидатов.
+- `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), выбор трека из кандидатов.
 - `src/commands/translit.js` — `translit`, `translitFallbacks`.
 - `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
 - `src/assistant/context.js` — история диалога, системный промпт «Аделина».
@@ -78,6 +78,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 7. **Wake-слова берутся из `.env`**, если переменная задана — она переопределяет дефолт в `config.js`. При смене wake-слова проверять `.env`, а не только код.
 8. **TTS v1 НЕ поддерживает `profanityFilter`** (400 unexpected field). Не добавлять этот параметр.
 9. `speakText` прерывает текущий трек и ставит его обратно в очередь после озвучки — сохранять это поведение при правках очереди.
+10. **Флаг `starting` в `VoiceSession` обязателен.** `start()` асинхронный (качает трек), а `player.state.status` остаётся `Idle` во время загрузки. Без `starting` `startNext()` при добавлении очереди запускает все треки разом (каждый выхватывает следующий из очереди), и 9 из 10 отбрасываются как «не Idle». `startNext()` не должен запускать новый трек, пока `start()` не завершился.
 
 ## Особенности выбора трека (dispatch.js)
 
@@ -88,6 +89,12 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - Победитель: `rank = score + log10(лайки альбома + 1) * 5`. Score теперь доминирует, лайки только разбивают ничьи у одноимённых треков (рабочий пример: «еверифинк блек» → Unlike Pluto — Everything Black, а не ARCHANGELZZ).
 - `best` в API нестабилен между запросами, поэтому нельзя полагаться на единственный вызов.
 - Смешанные запросы («poli сестра») — известная слабость: непонятно, какой язык/написание нужно. Улучшения приветствуются, но проверяй на реальном API.
+
+## «Просто музыка» (волна)
+
+- Триггеры в `parse.js` (`isWaveIntent`): «включи музыку», «включи что-нибудь», «включи популярное», «хиты», «чарт» и т.п. — запрос без конкретного названия → `__wave__`.
+- `playWave` (`dispatch.js`) тянет `/landing3/chart` (топ-чарт «популярное прямо сейчас»), тасует топ-50 и кладёт `WAVE_QUEUE_SIZE = 10` случайных треков в очередь.
+- **Ссылки на mp3 резолвятся лениво**: в очередь кладётся `url: () => music.playableUrl(id)` (функция), а не готовый URL — ссылка из `download-info` живёт ~1 мин, качать все 10 сразу нельзя. `trackResource` в `session.js` вызывает функцию в момент проигрывания.
 
 ## Логи и отладка
 

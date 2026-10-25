@@ -39,6 +39,12 @@ export class YandexMusicClient {
     };
   }
 
+  async chart(limit = 50) {
+    const data = await this.request('/landing3/chart');
+    const tracks = data?.result?.chart?.tracks ?? [];
+    return tracks.slice(0, limit).map((entry) => this.normalizeTrack(entry.track));
+  }
+
   async albumTracks(albumId) {
     const data = await this.request(`/albums/${albumId}/with-tracks`);
     const tracks = ((data?.result?.volumes ?? [])).flat();

@@ -1,8 +1,33 @@
 import { EndBehaviorType } from '@discordjs/voice';
-import { opus } from 'prism-media';
+import { Transform } from 'node:stream';
+import OpusScript from 'opusscript';
 import { recognizePcm } from '../stt/session.js';
 
 const MAX_UTTERANCE_BYTES = 48000 * 2 * 55;
+
+class OpusDecoder extends Transform {
+  constructor(rate) {
+    super();
+    this.decoder = new OpusScript(rate, 1, OpusScript.Application.AUDIO);
+  }
+
+  _transform(chunk, encoding, done) {
+    try {
+      this.push(this.decoder.decode(chunk));
+    } catch {
+      console.warn('Пропущен битый opus-пакет');
+    }
+    done();
+  }
+
+  _destroy(err, done) {
+    try {
+      this.decoder.delete();
+    } catch {
+    }
+    done(err);
+  }
+}
 
 export class VoiceListener {
   constructor(connection, botId, { apiKey, language, sampleRate, onUtterance } = {}) {
@@ -54,15 +79,13 @@ export class VoiceListener {
       const sub = this.connection.receiver.subscribe(userId, {
         end: { behavior: EndBehaviorType.AfterSilence, duration: 700 },
       });
-      const decoder = new opus.Decoder({
-        frameSize: 960,
-        channels: 1,
-        rate: this.sampleRate,
-      });
+      const decoder = new OpusDecoder(this.sampleRate);
       decoder.on('data', (chunk) => {
         entry.chunks.push(chunk);
         entry.bytes += chunk.length;
       });
+      decoder.on('error', (err) => console.error('Opus:', err.message));
+      sub.on('error', (err) => console.error('Поток речи:', err.message));
       sub.pipe(decoder);
 
       entry.sub = sub;

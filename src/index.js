@@ -27,8 +27,8 @@ const assistant = config.cloudApiKey && config.yandexGptFolderId
   : null;
 
 const commands = [
-  new SlashCommandBuilder().setName('join').setDescription('Позвать Алису в голосовой канал'),
-  new SlashCommandBuilder().setName('leave').setDescription('Выгнать Алису из канала'),
+  new SlashCommandBuilder().setName('join').setDescription('Позвать Нюшу в голосовой канал'),
+  new SlashCommandBuilder().setName('leave').setDescription('Выгнать Нюшу из канала'),
   new SlashCommandBuilder().setName('play')
     .setDescription('Включить трек по поиску')
     .addStringOption((option) => option

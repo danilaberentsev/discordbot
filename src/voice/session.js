@@ -8,6 +8,7 @@ import { Readable } from 'node:stream';
 import { get as httpsGet } from 'node:https';
 
 const MUSIC_VOLUME_DEFAULT = 0.45;
+const TTS_VOLUME_DEFAULT = 2.6;
 
 function clampVolume(value) {
   return Math.min(1, Math.max(0.05, value));
@@ -72,9 +73,12 @@ async function ttsResource(text, apiKey, voice) {
     }),
   });
   if (!res.ok) throw new Error(`TTS ${res.status}: ${await res.text()}`);
-  return createAudioResource(Readable.fromWeb(res.body), {
+  const resource = createAudioResource(Readable.fromWeb(res.body), {
     inputType: StreamType.OggOpus,
+    inlineVolume: true,
   });
+  resource.volume?.setVolume(TTS_VOLUME_DEFAULT);
+  return resource;
 }
 
 export class VoiceSession {
@@ -103,11 +107,11 @@ export class VoiceSession {
         console.log(`[voice] ${oldState.status} -> ${newState.status}`);
       }
     });
-    this.probe = setInterval(() => {
-      console.log(
-        `[probe] conn=${this.connection.state.status} subs=${this.player.subscribers.length} player=${this.player.state.status}`,
-      );
-    }, 1000);
+    // this.probe = setInterval(() => {
+    //   console.log(
+    //     `[probe] conn=${this.connection.state.status} subs=${this.player.subscribers.length} player=${this.player.state.status}`,
+    //   );
+    // }, 1000);
   }
 
   startNext() {

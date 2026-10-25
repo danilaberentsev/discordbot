@@ -9,7 +9,7 @@ export const config = {
   sttLanguage: process.env.STT_LANGUAGE ?? 'ru-RU',
   sttSampleRate: 48000,
   ttsVoice: process.env.TTS_VOICE ?? 'alena',
-  wakeWords: (process.env.WAKE_WORDS ?? 'алиса,alice,алис,ализа,алёса')
+  wakeWords: (process.env.WAKE_WORDS ?? 'нюша,niusha,нюс,нюся,нюш')
     .split(',')
     .map((word) => word.trim().toLowerCase())
     .filter(Boolean),

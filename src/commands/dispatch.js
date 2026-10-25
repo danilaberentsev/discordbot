@@ -5,8 +5,7 @@ import { scoreTrack, tokenize } from './score.js';
 
 const CANDIDATE_SCORE_THRESHOLD = 30;
 const LIKES_WEIGHT = 5;
-const WAVE_QUEUE_SIZE = 10;
-const WAVE_TOP = 50;
+const WAVE_CHART_LIMIT = 100;
 
 function defaultFixer(query) {
   if (process.env.YANDEX_CLOUD_API_KEY && process.env.YANDEXGPT_FOLDER_ID) {
@@ -77,24 +76,43 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
   return startPicked(session, music, primary);
 }
 
-function sampleTracks(tracks, count) {
-  const pool = [...tracks];
+function shuffle(items) {
+  const pool = [...items];
   for (let i = pool.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [pool[i], pool[j]] = [pool[j], pool[i]];
   }
-  return pool.slice(0, count);
+  return pool;
+}
+
+async function enqueueChart(session, music) {
+  const chart = await music.chart(WAVE_CHART_LIMIT);
+  if (!chart.length) return 0;
+  for (const track of shuffle(chart)) {
+    session.playTrack({ title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
+  }
+  return chart.length;
 }
 
 async function playWave(session, music) {
-  const chart = await music.chart(WAVE_TOP);
-  if (!chart.length) return 'Ничего не нашла в чарте';
-  const picks = sampleTracks(chart, WAVE_QUEUE_SIZE);
-  for (const track of picks) {
-    session.playTrack({ title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
+  const refill = async () => {
+    try {
+      await enqueueChart(session, music);
+    } catch (err) {
+      console.error('Волна: не удалось догрузить чарт:', err.message);
+    }
+  };
+  let count;
+  try {
+    count = await enqueueChart(session, music);
+  } catch (err) {
+    console.error('Волна:', err.message);
+    return `Не получилось: ${err.message}`;
   }
-  console.log(`Волна: в очереди ${picks.length} популярных треков`);
-  return `Включаю: ${picks.length} популярных треков`;
+  if (!count) return 'Ничего не нашла в чарте';
+  session.setWaveRefill(refill);
+  console.log(`Волна: ${count} треков в очереди`);
+  return 'Включаю: популярные треки';
 }
 
 async function albumLikes(music, albumId, cache) {
@@ -111,9 +129,17 @@ async function albumLikes(music, albumId, cache) {
 }
 
 async function startPicked(session, music, candidate) {
-  const url = await music.playableUrl(candidate.picked.id);
-  await session.playTrack({ title: candidate.picked.title, artists: candidate.picked.artists, url });
   const label = candidate.picked.artists ? `${candidate.picked.artists} — ${candidate.picked.title}` : candidate.picked.title;
+  if (session.waveRefill) {
+    session.playNext({
+      title: candidate.picked.title,
+      artists: candidate.picked.artists,
+      url: () => music.playableUrl(candidate.picked.id),
+    });
+  } else {
+    const url = await music.playableUrl(candidate.picked.id);
+    await session.playTrack({ title: candidate.picked.title, artists: candidate.picked.artists, url });
+  }
   console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
   return `Включаю: ${label}`;
 }

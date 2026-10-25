@@ -109,6 +109,7 @@ export class VoiceSession {
     this.queue = [];
     this.current = null;
     this.starting = false;
+    this.waveRefill = null;
 
     this.player = createAudioPlayer();
     connection.subscribe(this.player);
@@ -117,6 +118,7 @@ export class VoiceSession {
       this.current = null;
       const next = this.queue.shift();
       if (next) this.start(next);
+      else if (this.waveRefill) this.waveRefill();
     });
     this.player.on('error', (err) => console.error('Плеер:', err.message));
     this.player.on('stateChange', (oldState, newState) => {
@@ -176,6 +178,17 @@ export class VoiceSession {
     return item;
   }
 
+  playNext(item) {
+    item.kind = 'track';
+    this.queue.unshift(item);
+    this.startNext();
+    return item;
+  }
+
+  setWaveRefill(fn) {
+    this.waveRefill = fn;
+  }
+
   async speakText(text, { apiKey, voice }) {
     const item = { kind: 'tts', text, apiKey, voice };
     const status = this.player.state.status;
@@ -196,6 +209,7 @@ export class VoiceSession {
   }
 
   stopPlaying() {
+    this.waveRefill = null;
     this.queue = this.queue.filter((item) => item.kind === 'tts');
     this.current = null;
     this.player.stop(true);

@@ -20,6 +20,7 @@ Discord-бот «Аделина» (пакет `discordbot-alisa`) на Node.js (
 
 ```bash
 npm start                       # запуск бота
+npm run dev                     # запуск с авто-рестартом (nodemon)
 node --check src/...            # синтаксис
 ```
 
@@ -35,7 +36,13 @@ node -e "require('dotenv').config(); Promise.all([import('./src/music/client.js'
 node -e "require('dotenv').config(); fetch('https://tts.api.cloud.yandex.net/speech/v1/tts:synthesize', { method: 'POST', headers: { Authorization: 'Api-Key ' + process.env.YANDEX_CLOUD_API_KEY }, body: new URLSearchParams({ text: 'привет', voice: 'alena', lang: 'ru-RU', format: 'oggopus' }) }).then((r) => console.log(r.status))"
 ```
 
-Тест STT (синхронный HTTP, `lpcm` 48k):
+Тест STT v3 (gRPC, тишина 1 сек — должно подключиться без ошибки и 403):
+
+```bash
+node --input-type=module -e "import 'dotenv/config'; const { recognizePcmV3 } = await import('./src/stt/v3.js'); const r = await recognizePcmV3(process.env.YANDEX_CLOUD_API_KEY, Buffer.alloc(48000*2), { language: 'ru-RU', sampleRate: 48000 }); console.log('result:', JSON.stringify(r))"
+```
+
+Тест STT v1 (синхронный HTTP, фолбэк, `lpcm` 48k):
 
 ```bash
 node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&sampleRateHertz=48000&lang=ru-RU', { method: 'POST', headers: { Authorization: 'Api-Key ' + process.env.YANDEX_CLOUD_API_KEY }, body: Buffer.alloc(48000) }).then(async (r) => console.log(r.status, await r.text()))"
@@ -48,7 +55,9 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/voice/session.js` — плеер, очередь, скачивание mp3, TTS-ресурс, громкости.
 - `src/voice/connection.js` — join с `selfDeaf: false`, `debug: true` (debug можно убрать).
 - `src/listen/listener.js` — подписка на речь, opus→PCM, буфер фразы, вызов `recognizePcm`.
-- `src/stt/session.js` — `recognizePcm(apiKey, pcm, {language, sampleRate})`, синхронный HTTP.
+- `src/stt/session.js` — `recognizePcm(apiKey, pcm, {language, sampleRate})`: v3, при ошибке фолбэк на v1 HTTP.
+- `src/stt/v3.js` — `recognizePcmV3`, gRPC-стриминг SpeechKit v3 (LPCM → `final`/`partial` текст).
+- `src/stt/proto/` — proto-файлы SpeechKit v3 (полный `stt.proto` из cloudapi + урезанный `stt_service.proto`).
 - `src/tts/synthesize.js` — `speakUma(session, text)`, проверяет наличие ключа.
 - `src/music/client.js` — `searchTracks`, `searchAll`, `albumTracks`, `normalizeTrack`, `playableUrl`.
 - `src/commands/parse.js` — `normalize`, `stripWake`, `parseCommand`.
@@ -62,7 +71,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 1. **Один AudioPlayer на VoiceConnection.** В `@discordjs/voice` 0.19 второй `connection.subscribe(player)` молча отписывает первый. Музыка и TTS — одна очередь (`kind: 'track' | 'tts'`) в `VoiceSession`. Не добавлять второй плеер.
 2. **Не стримить mp3 напрямую в плеер.** CDN Яндекса рвёт длинные соединения (`terminated` undici / `aborted` https). `downloadTrack()` качает файл целиком в память, затем играет; обязательно следовать 3xx (`get-mp3` отдаёт 308).
 3. **Громкость через `resource.volume.setVolume`** (в 0.19 нет `volumeTransformer`). Музыка `MUSIC_VOLUME_DEFAULT = 0.45`, TTS `TTS_VOLUME_DEFAULT = 1.6`.
-4. **STT только синхронный HTTP.** WebSocket-эндпоинты `transcribe.api.cloud.yandex.net` (v1 и v3) отдают 403 даже с корректными ролями; рабочий путь — `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`. Не возвращать WS-код.
+4. **STT — v3 gRPC-стриминг, фолбэк на v1 HTTP.** v3 — bidirectional gRPC `speechkit.stt.v3.Recognizer/RecognizeStreaming` на `stt.api.cloud.yandex.net:443`, авторизация через metadata `authorization: Api-Key <key>`, аудио raw LPCM 16-bit. WebSocket-эндпоинты (хосты `transcribe.api.cloud.yandex.net`) отдают 403 — это v2 async REST, не использовать и не возвращать WS-код. При ошибке v3 `src/stt/session.js` падает на v1 `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`.
 5. **Поиск: `type=all` и блок `best`.** `type=track` не находит часть каталога (пример: Unlike Pluto — Everything Black). Если `best.type === 'album'` — тянуть треки через `/albums/{id}/with-tracks` (не `/albums/{id}/tracks` — 404 для синглов). Если `best.type` — не track/album и треков нет, возвращать `null` (иначе падение на `undefined.artists`).
 6. **Ссылка на mp3 из `download-info` живёт ~1 минуту**; формула: `md5(SIGN_SALT + path.slice(1) + s)`, URL `https://{host}/get-mp3/{sign}/{ts}{path}`. Заголовок `X-Yandex-Music-Client` обязателен для download-info.
 7. **Wake-слова берутся из `.env`**, если переменная задана — она переопределяет дефолт в `config.js`. При смене wake-слова проверять `.env`, а не только код.

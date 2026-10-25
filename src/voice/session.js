@@ -14,9 +14,28 @@ function clampVolume(value) {
   return Math.min(1, Math.max(0.05, value));
 }
 
-async function trackResource(url, volume) {
-  const buffer = await downloadTrack(url);
-  const resource = createAudioResource(Readable.from(buffer), {
+function bufferStream(buffer, start, onProgress) {
+  let offset = start;
+  return new Readable({
+    read() {
+      if (offset >= buffer.length) {
+        this.push(null);
+        return;
+      }
+      const chunk = buffer.subarray(offset, Math.min(offset + 64 * 1024, buffer.length));
+      offset += chunk.length;
+      onProgress?.(offset);
+      this.push(chunk);
+    },
+  });
+}
+
+async function trackResource(item, volume) {
+  if (!item.buffer) item.buffer = await downloadTrack(item.url);
+  const stream = bufferStream(item.buffer, item.offset ?? 0, (bytes) => {
+    item.offset = bytes;
+  });
+  const resource = createAudioResource(stream, {
     inputType: StreamType.Arbitrary,
     inlineVolume: true,
   });
@@ -124,7 +143,7 @@ export class VoiceSession {
     try {
       const resource = item.kind === 'tts'
         ? await ttsResource(item.text, item.apiKey, item.voice)
-        : await trackResource(item.url, this.musicVolume);
+        : await trackResource(item, this.musicVolume);
       if (this.player.state.status !== AudioPlayerStatus.Idle) {
         try {
           resource.playStream.destroy();
@@ -142,6 +161,7 @@ export class VoiceSession {
   }
 
   async playTrack(item) {
+    item.kind = 'track';
     this.queue.push(item);
     this.startNext();
     return item;

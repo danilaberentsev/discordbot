@@ -4,7 +4,7 @@
 
 ## Контекст
 
-Discord-бот «Нюша» (пакет `discordbot-alisa`) на Node.js (ESM, `type: module`). Голосовой канал: wake-слово → речь в текст (Yandex SpeechKit) → команда (музыка Яндекс Музыки / вопрос YandexGPT) → ответ голосом (SpeechKit TTS).
+Discord-бот «Аделина» (пакет `discordbot-alisa`) на Node.js (ESM, `type: module`). Голосовой канал: wake-слово → речь в текст (Yandex SpeechKit) → команда (музыка Яндекс Музыки / вопрос YandexGPT) → ответ голосом (SpeechKit TTS).
 
 Общение с пользователем — по-русски. Проект pet/экспериментальный: код без лишних комментариев, стиль минималистичный, ESM-импорты, `console.log` для логов.
 
@@ -55,7 +55,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, выбор трека из кандидатов.
 - `src/commands/translit.js` — `translit`, `translitFallbacks`.
 - `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
-- `src/assistant/context.js` — история диалога, системный промпт «Нюша».
+- `src/assistant/context.js` — история диалога, системный промпт «Аделина».
 
 ## Инварианты, которые нельзя ломать
 
@@ -90,7 +90,7 @@ Probe-интервал в `VoiceSession` закомментирован — пр
 - `dispatch.js` читает env напрямую для GPT-фиксера — при рефакторинге перенести в `config.js`.
 - Убрать `debug: true` из `voice/connection.js` перед продакшеном.
 - Нет тестов; при добавлении — Vitest/Jest не настроены, выбирать осознанно.
-- Пакет всё ещё называется `discordbot-alisa`, бот — «Нюша».
+- Пакет всё ещё называется `discordbot-alisa`, бот — «Аделина».
 
 ## Git
 

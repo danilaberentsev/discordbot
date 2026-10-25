@@ -9,18 +9,46 @@ export function normalize(text) {
     .trim();
 }
 
+function compact(text) {
+  return normalize(text)
+    .replaceAll('э', 'е')
+    .replaceAll('й', 'и')
+    .replace(/[^а-яa-z]/g, '');
+}
+
+const SPACEGLIDE_QUERY = 'unlike pluto everything black';
+
+const SPACEGLIDE_VARIANTS = [
+  'спейс глайд',
+  'спейс глейд',
+  'спейс глайт',
+  'спейс глейт',
+  'спейс гляйд',
+  'спейс глай',
+  'спейс глей',
+  'space glide',
+  'spaceglide',
+];
+
+const ALIASES = new Map(
+  SPACEGLIDE_VARIANTS.map((variant) => [compact(variant), SPACEGLIDE_QUERY]),
+);
+
 export function stripWake(text) {
   const norm = normalize(text);
   const tokens = norm.split(' ');
-  if (tokens.length && config.wakeWords.includes(tokens[0])) {
-    return { matched: true, rest: tokens.slice(1).join(' ').trim() };
+  if (!tokens.some((token) => config.wakeWords.includes(token))) {
+    return { matched: false, rest: norm };
   }
-  return { matched: false, rest: norm };
+  const rest = tokens.filter((token) => !config.wakeWords.includes(token)).join(' ').trim();
+  return { matched: true, rest };
 }
 
 export function parseCommand(text) {
   const t = normalize(text);
   if (!t) return null;
+  const alias = ALIASES.get(compact(t));
+  if (alias) return { action: 'play', query: alias };
   if (/^(стоп|хватит|все)$/.test(t)) return { action: 'stop' };
   if (/^(дальше|следующий|следующую|next|другой|другую|скип)$/.test(t)) {
     return { action: 'skip' };

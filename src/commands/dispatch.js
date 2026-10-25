@@ -1,6 +1,11 @@
-const WAVE_QUERY = 'главные хиты';
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
+import { cleanQuery } from './parse.js';
+import { scoreTrack, tokenize } from './score.js';
+
+const WAVE_QUERY = 'главные хиты';
+const CANDIDATE_SCORE_THRESHOLD = 30;
+const LIKES_WEIGHT = 5;
 
 function defaultFixer(query) {
   if (process.env.YANDEX_CLOUD_API_KEY && process.env.YANDEXGPT_FOLDER_ID) {
@@ -35,37 +40,37 @@ export async function runMusicCommand(session, music, cmd) {
 export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (!music) throw new Error('YANDEX_MUSIC_TOKEN не настроен');
   const wave = !query || query === '__wave__' || query.includes('моя волна');
-  const actualQuery = wave ? WAVE_QUERY : query;
+  const actualQuery = wave ? WAVE_QUERY : cleanQuery(query);
 
   const primary = await pickTrack(music, actualQuery, wave);
   if (wave && !primary) return `Ничего не нашла для «${actualQuery}»`;
 
-  if (!wave && (!primary || primary.score < 20) && /[a-zа-яё]/i.test(actualQuery)) {
-    const candidateQueries = [];
+  if (!wave && (!primary || primary.score < CANDIDATE_SCORE_THRESHOLD) && /[a-zа-яё]/i.test(actualQuery)) {
+    const candidateQueries = new Set();
     if (fixer) {
       try {
         const fixed = await fixer(actualQuery);
-        if (fixed && fixed.toLowerCase() !== actualQuery.toLowerCase()) candidateQueries.push(fixed);
+        if (fixed && cleanQuery(fixed) !== actualQuery.toLowerCase()) candidateQueries.add(fixed);
       } catch (err) {
         console.log('Фикс запроса не удался:', err.message);
       }
     }
-    candidateQueries.push(...translitFallbacks(actualQuery));
+    for (const candidate of translitFallbacks(actualQuery)) candidateQueries.add(candidate);
 
     const alts = primary ? [primary] : [];
-    for (const candidateQuery of candidateQueries) {
-      const alt = await pickTrack(music, candidateQuery, false);
-      if (alt) alts.push(alt);
+    const settled = await Promise.allSettled([...candidateQueries].map((c) => pickTrack(music, c, false)));
+    for (const result of settled) {
+      if (result.status === 'fulfilled' && result.value) alts.push(result.value);
     }
     if (!alts.length) return `Ничего не нашла по запросу ${actualQuery}`;
 
     const likesCache = new Map();
-    for (const alt of alts) {
+    await Promise.all(alts.map(async (alt) => {
       const likes = await albumLikes(music, alt.picked.albumId, likesCache);
-      alt.rank = (likes ?? 0) + alt.score * 0.3;
+      alt.rank = alt.score + Math.log10((likes ?? 0) + 1) * LIKES_WEIGHT;
       console.log(`Кандидат «${alt.query}»: score=${alt.score}, лайков=${likes ?? '?'} -> ${alt.picked.artists} — ${alt.picked.title}`);
-    }
-    const winner = alts.reduce((best, alt) => (alt.rank > best.rank ? alt : best), primary ?? alts[0]);
+    }));
+    const winner = alts.reduce((best, alt) => (alt.rank > best.rank ? alt : best));
     return startPicked(session, music, winner);
   }
   return startPicked(session, music, primary);
@@ -96,7 +101,7 @@ async function pickTrack(music, query, wave) {
   let searchQuery = query;
   let { best, tracks } = await music.searchAll(searchQuery);
   console.log(`Поиск «${searchQuery}»: треков ${tracks.length}, best ${best ? best.type : 'null'}`);
-  let tokens = searchQuery.toLowerCase().split(/\s+/).filter(Boolean);
+  const tokens = tokenize(searchQuery);
   while (!tracks.length && !best && tokens.length > 1) {
     tokens.pop();
     searchQuery = tokens.join(' ');
@@ -104,35 +109,31 @@ async function pickTrack(music, query, wave) {
     console.log(`Поиск с урезанным запросом «${searchQuery}»: треков ${tracks.length}`);
   }
   if (!tracks.length && !best) return null;
-  tracks = tracks.map((t) => music.normalizeTrack(t));
 
   let picked;
-  if (!wave && best?.type === 'track' && best.result) {
-    picked = music.normalizeTrack(best.result);
-  } else if (!wave && best?.type === 'album' && best.result?.id) {
-    const album = await music.albumTracks(best.result.id);
-    console.log(`Взят трек из best-альбома «${best.result.title}» (${album.length} треков)`);
-    picked = album[0];
-  } else if (wave) {
+  if (wave) {
     picked = tracks[Math.floor(Math.random() * tracks.length)];
+  } else if (best?.type === 'album' && best.result?.id) {
+    const album = await music.albumTracks(best.result.id);
+    console.log(`Взят best-альбом «${best.result.title}» (${album.length} треков)`);
+    const scored = album.map((t) => ({ t, s: scoreTrack(t, query) }));
+    scored.sort((a, b) => b.s - a.s);
+    picked = scored.length && scored[0].s > 0 ? scored[0].t : album[0];
+  } else if (best?.type === 'track' && best.result) {
+    const bestTrack = music.normalizeTrack(best.result);
+    const topFromList = tracks.length
+      ? [...tracks].sort((a, b) => scoreTrack(b, query) - scoreTrack(a, query))[0]
+      : null;
+    const bestScore = scoreTrack(bestTrack, query);
+    const listScore = topFromList ? scoreTrack(topFromList, query) : -1;
+    picked = listScore > bestScore ? topFromList : bestTrack;
   } else if (tracks.length) {
-    picked = [...tracks].sort((a, b) => scoreTrack(b, tokens, searchQuery) - scoreTrack(a, tokens, searchQuery))[0];
+    picked = [...tracks].sort((a, b) => scoreTrack(b, query) - scoreTrack(a, query))[0];
   } else {
     return null;
   }
-  if (!picked) return null;
-  const score = wave ? 100 : scoreTrack(picked, tokens, searchQuery);
-  return { query, picked, score };
-}
 
-function scoreTrack(track, tokens, query) {
-  const hay = `${track.artists} ${track.title}`.toLowerCase();
-  let score = 0;
-  for (const token of tokens) {
-    if (hay.includes(token)) score += 10;
-  }
-  const title = track.title.toLowerCase();
-  if (hay.includes(query.toLowerCase())) score += 20;
-  if (title === query.toLowerCase()) score += 30;
-  return score;
+  if (!picked) return null;
+  const score = wave ? 100 : scoreTrack(picked, query);
+  return { query, picked, score };
 }

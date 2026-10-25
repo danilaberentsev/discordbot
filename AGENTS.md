@@ -59,8 +59,9 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/stt/v3.js` — `recognizePcmV3`, gRPC-стриминг SpeechKit v3 (LPCM → `final`/`partial` текст).
 - `src/stt/proto/` — proto-файлы SpeechKit v3 (полный `stt.proto` из cloudapi + урезанный `stt_service.proto`).
 - `src/tts/synthesize.js` — `speakUma(session, text)`, проверяет наличие ключа.
-- `src/music/client.js` — `searchTracks`, `searchAll`, `albumTracks`, `normalizeTrack`, `playableUrl`.
-- `src/commands/parse.js` — `normalize`, `stripWake`, `parseCommand`.
+- `src/music/client.js` — `searchAll` (type=all, нормализует треки), `albumTracks`, `normalizeTrack`, `playableUrl`.
+- `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `stripWake`, `parseCommand`.
+- `src/commands/score.js` — `scoreTrack`, `tokenize`, `levenshtein` (word-boundary + fuzzy).
 - `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, выбор трека из кандидатов.
 - `src/commands/translit.js` — `translit`, `translitFallbacks`.
 - `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
@@ -80,9 +81,11 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 ## Особенности выбора трека (dispatch.js)
 
-- Сначала `pickTrack` по исходному запросу. `scoreTrack`: +10 за каждое слово запроса в «артист + название», +20 за полную подстроку, +30 за точное совпадение названия.
-- Если score < 20 (или результата нет) — кандидаты: GPT-фикс запроса (`fixUtterance`) + `translitFallbacks`. Все кандидаты прогоняются через `pickTrack`.
-- Победитель: `rank = лайки альбома + score * 0.3`. Лайки доминируют, потому что одноимённых треков много (рабочий пример: «еверифинк блек» → Unlike Pluto — Everything Black, а не ARCHANGELZZ).
+- Сначала `pickTrack` по исходному запросу (запрос чистится `cleanQuery` от филлеров «мне», «пожалуйста», «песню», «трек», «музыку»).
+- `scoreTrack` (`src/commands/score.js`): +100 за точное совпадение названия, +70 за фразу внутри названия, +40 за фразу в исполнителе, до +15/+8 за каждый токен (title/artist) с fuzzy-совпадением по Левенштейну (порог 0.75). Совпадение по границам слов — «black» не матчит «blackout».
+- `best.type === 'album'` — треки альбома скорятся против запроса, берётся лучший (не `[0]`). `best.type === 'track'` — сравнивается со скорингом списка `tracks`, берётся лучший.
+- Если score < 30 (или результата нет) — кандидаты: GPT-фикс запроса (`fixUtterance`) + `translitFallbacks`. Кандидаты идут параллельно (`Promise.allSettled`).
+- Победитель: `rank = score + log10(лайки альбома + 1) * 5`. Score теперь доминирует, лайки только разбивают ничьи у одноимённых треков (рабочий пример: «еверифинк блек» → Unlike Pluto — Everything Black, а не ARCHANGELZZ).
 - `best` в API нестабилен между запросами, поэтому нельзя полагаться на единственный вызов.
 - Смешанные запросы («poli сестра») — известная слабость: непонятно, какой язык/написание нужно. Улучшения приветствуются, но проверяй на реальном API.
 

@@ -16,6 +16,18 @@ function compact(text) {
     .replace(/[^а-яa-z]/g, '');
 }
 
+const FILLER_WORDS = new Set([
+  'мне', 'нам', 'пожалуйста', 'плиз',
+  'песню', 'песенку', 'трек', 'треки', 'музыку',
+  'давай', 'ну', 'вот', 'это', 'эту', 'этот',
+]);
+
+export function cleanQuery(text) {
+  const norm = normalize(text);
+  const tokens = norm.split(' ').filter((t) => !FILLER_WORDS.has(t));
+  return tokens.join(' ').trim() || norm.trim();
+}
+
 const SPACEGLIDE_QUERY = 'unlike pluto everything black';
 
 const SPACEGLIDE_VARIANTS = [
@@ -58,7 +70,7 @@ export function parseCommand(text) {
   if (t === 'моя волна' || t === 'радио' || t === 'музыку' || t === 'музыка') {
     return { action: 'play', query: '__wave__' };
   }
-  const play = t.match(/^(включи|запусти|поставь|играй)\s+(.+)$/);
-  if (play) return { action: 'play', query: play[2].trim() };
+  const play = t.match(/^(?:хочу\s+)?(?:послушать|слушать|послушай|включить|включи|запустить|запусти|поставь|поставить|играй|сыграй)\s+(.+)$/);
+  if (play) return { action: 'play', query: cleanQuery(play[1]) };
   return { action: 'assistant', text: t };
 }

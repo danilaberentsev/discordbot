@@ -29,27 +29,13 @@ export class YandexMusicClient {
     return res.json();
   }
 
-  async searchTracks(query, limit = 20) {
-    const data = await this.request(
-      `/search?text=${encodeURIComponent(query)}&type=track&page=1&pageSize=${limit}`,
-    );
-    const tracks = data?.result?.tracks?.results ?? [];
-    return tracks.map((track) => ({
-      id: track.id,
-      albumId: track.albums?.[0]?.id ?? null,
-      title: track.title ?? 'Без названия',
-      artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(', '),
-      durationMs: track.durationMs ?? 0,
-    }));
-  }
-
   async searchAll(query, limit = 30) {
     const data = await this.request(
       `/search?text=${encodeURIComponent(query)}&type=all&page=1&pageSize=${limit}`,
     );
     return {
       best: data?.result?.best ?? null,
-      tracks: data?.result?.tracks?.results ?? [],
+      tracks: (data?.result?.tracks?.results ?? []).map((t) => this.normalizeTrack(t)),
     };
   }
 

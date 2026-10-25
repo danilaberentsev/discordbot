@@ -4,10 +4,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ENDPOINT = 'stt.api.cloud.yandex.net:443';
+const MODEL = 'general:rc';
 
 const LINEAR16_PCM = 1;
 const TEXT_NORMALIZATION_ENABLED = 1;
 const WHITELIST = 1;
+const FULL_DATA = 2;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgDef = loadSync(join(here, 'proto', 'stt_service.proto'), {
@@ -28,14 +30,14 @@ export function recognizePcmV3(apiKey, pcm, { language = 'ru-RU', sampleRate = 4
     metadata.set('authorization', `Api-Key ${apiKey}`);
 
     const stream = client.RecognizeStreaming(metadata, { deadline: Date.now() + 15000 });
-    let finalText = '';
+    const finals = [];
     let partialText = '';
 
     stream.on('error', reject);
-    stream.on('end', () => resolve((finalText || partialText).trim()));
+    stream.on('end', () => resolve((finals.join(' ') || partialText).trim()));
     stream.on('data', (response) => {
       if (response.final?.alternatives?.[0]?.text) {
-        finalText = response.final.alternatives[0].text;
+        finals.push(response.final.alternatives[0].text);
       }
       if (response.partial?.alternatives?.[0]?.text) {
         partialText = response.partial.alternatives[0].text;
@@ -45,6 +47,7 @@ export function recognizePcmV3(apiKey, pcm, { language = 'ru-RU', sampleRate = 4
     stream.write({
       sessionOptions: {
         recognitionModel: {
+          model: MODEL,
           audioFormat: {
             rawAudio: {
               audioEncoding: LINEAR16_PCM,
@@ -57,6 +60,7 @@ export function recognizePcmV3(apiKey, pcm, { language = 'ru-RU', sampleRate = 4
             restrictionType: WHITELIST,
             languageCode: [language],
           },
+          audioProcessingType: FULL_DATA,
         },
         eouClassifier: { externalClassifier: {} },
       },

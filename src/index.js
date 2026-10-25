@@ -25,6 +25,7 @@ const sessions = new Map();
 const assistant = config.cloudApiKey && config.yandexGptFolderId
   ? new Assistant({ apiKey: config.cloudApiKey, folderId: config.yandexGptFolderId })
   : null;
+const LISTEN_WINDOW_MS = 8000;
 
 const commands = [
   new SlashCommandBuilder().setName('join').setDescription('Позвать Аделину в голосовой канал'),
@@ -72,7 +73,7 @@ function getSession(guild, channel) {
   listener.start();
   const music = config.yandexMusicToken ? new YandexMusicClient(config.yandexMusicToken) : null;
 
-  const record = { connection, session, listener, music };
+  const record = { connection, session, listener, music, listeningUntil: 0 };
   sessions.set(guild.id, record);
   return record;
 }
@@ -90,22 +91,36 @@ async function handleUtterance(guildId, text, userId) {
   const record = sessions.get(guildId);
   if (!record) return;
   const { matched, rest } = stripWake(text);
-  if (!matched) return;
-  console.log(`Голос -> команда: "${rest}" (было: "${text}")`);
 
-  if (!rest) {
-    await speakUma(record.session, 'Да?');
+  if (matched) {
+    console.log(`Голос -> команда: "${rest}" (было: "${text}")`);
+    if (rest) {
+      record.listeningUntil = 0;
+      await runCommand(record, rest, userId);
+    } else {
+      record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
+      await speakUma(record.session, 'Слушаю');
+    }
     return;
   }
 
-  const cmd = parseCommand(rest);
-  if (!cmd) return;
+  if (record.listeningUntil && Date.now() < record.listeningUntil) {
+    console.log(`Голос -> команда (без wake): "${text}"`);
+    if (await runCommand(record, text, userId)) {
+      record.listeningUntil = 0;
+    }
+  }
+}
+
+async function runCommand(record, text, userId) {
+  const cmd = parseCommand(text);
+  if (!cmd) return false;
 
   if (cmd.action === 'assistant') {
     if (!assistant) {
       console.log('Ассистент не настроен, нужен YANDEX_CLOUD_API_KEY и YANDEXGPT_FOLDER_ID');
       await speakUma(record.session, 'Ассистент пока не настроен');
-      return;
+      return true;
     }
     try {
       const answer = await assistant.ask(userId, cmd.text);
@@ -114,7 +129,7 @@ async function handleUtterance(guildId, text, userId) {
       console.error('Ассистент:', err.message);
       await speakUma(record.session, 'Что-то я тебе не поняла, попробуй ещё раз');
     }
-    return;
+    return true;
   }
 
   try {
@@ -126,6 +141,7 @@ async function handleUtterance(guildId, text, userId) {
     console.error('Команда:', err.message);
     await speakUma(record.session, `Не получилось: ${err.message}`);
   }
+  return true;
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {

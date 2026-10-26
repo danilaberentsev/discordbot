@@ -127,6 +127,16 @@ export class VoiceListener {
   }
 
   closeUser(userId) {
+    const entry = this.users.get(userId);
+    if (!entry) return;
+    try {
+      entry.sub?.destroy();
+    } catch {
+    }
+    try {
+      entry.dec?.destroy();
+    } catch {
+    }
     this.users.delete(userId);
   }
 }

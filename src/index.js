@@ -81,10 +81,22 @@ function getSession(guild, channel) {
 function destroySession(guildId) {
   const record = sessions.get(guildId);
   if (!record) return;
-  record.session.destroy();
-  record.listener.stop();
-  record.connection.destroy();
   sessions.delete(guildId);
+  try {
+    record.session.destroy();
+  } catch (err) {
+    console.error('session.destroy:', err.message);
+  }
+  try {
+    record.listener.stop();
+  } catch (err) {
+    console.error('listener.stop:', err.message);
+  }
+  try {
+    record.connection.destroy();
+  } catch (err) {
+    console.error('connection.destroy:', err.message);
+  }
 }
 
 async function handleUtterance(guildId, text, userId) {
@@ -115,6 +127,11 @@ async function handleUtterance(guildId, text, userId) {
 async function runCommand(record, text, userId) {
   const cmd = parseCommand(text);
   if (!cmd) return false;
+
+  if (cmd.action === 'leave') {
+    destroySession(record.connection.joinConfig.guildId);
+    return true;
+  }
 
   if (cmd.action === 'assistant') {
     if (!assistant) {

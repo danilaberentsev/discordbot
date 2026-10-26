@@ -234,5 +234,9 @@ export class VoiceSession {
 
   destroy() {
     clearInterval(this.probe);
+    try {
+      this.player.stop(true);
+    } catch {
+    }
   }
 }

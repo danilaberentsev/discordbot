@@ -80,6 +80,9 @@ export function parseCommand(text) {
   if (/^(дальше|следующий|следующую|next|другой|другую|скип)$/.test(t)) {
     return { action: 'skip' };
   }
+  if (/^(выйди|уйди|выходи|уходи|отключись|пока)(\s|$)/.test(t)) {
+    return { action: 'leave' };
+  }
   if (/^(тише|потише)$/.test(t)) return { action: 'volume', delta: -0.15 };
   if (/^(громче|погромче)$/.test(t)) return { action: 'volume', delta: 0.15 };
   if (t === 'моя волна' || t === 'радио' || isWaveIntent(t)) {

@@ -39,6 +39,15 @@ export class YandexMusicClient {
     };
   }
 
+  async instantSearch(query, { type = 'track', pageSize = 36 } = {}) {
+    const data = await this.request(
+      `/search/instant/mixed?text=${encodeURIComponent(query)}&type=${type}&page=0&pageSize=${pageSize}&withLikesCount=true&withBestResults=true`,
+    );
+    return (data?.result?.results ?? [])
+      .filter((r) => r.type === 'track' && r.track)
+      .map((r) => this.normalizeTrack(r.track));
+  }
+
   async chart(limit = 50) {
     const data = await this.request('/landing3/chart');
     const tracks = data?.result?.chart?.tracks ?? [];

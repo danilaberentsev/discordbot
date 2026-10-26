@@ -11,6 +11,7 @@ export const config = {
   ttsVoice: process.env.TTS_VOICE ?? 'alena',
   autojoinUserId: process.env.AUTOJOIN_USER_ID ?? '',
   followupEnabled: process.env.FOLLOWUP_ENABLED === 'true',
+  searchApi: process.env.SEARCH_API ?? 'instant',
   wakeWords: (process.env.WAKE_WORDS ?? 'аделина,adelina,аделинка,аделя,адель')
     .split(',')
     .map((word) => word.trim().toLowerCase())

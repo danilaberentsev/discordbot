@@ -46,6 +46,8 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (wave) return playWave(session, music);
 
   const actualQuery = cleanQuery(query);
+  if (config.searchApi === 'instant') return playInstant(session, music, actualQuery);
+
   const primary = await pickTrack(music, actualQuery);
 
   if ((!primary || primary.score < CANDIDATE_SCORE_THRESHOLD) && /[a-zа-яё]/i.test(actualQuery)) {
@@ -150,6 +152,14 @@ async function startPicked(session, music, candidate) {
   }
   console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
   return `Включаю: ${label}`;
+}
+
+async function playInstant(session, music, query) {
+  const tracks = await music.instantSearch(query);
+  console.log(`Поиск instant «${query}»: треков ${tracks.length}`);
+  const picked = tracks[0];
+  if (!picked) return `Ничего не нашла по запросу ${query}`;
+  return startPicked(session, music, { query, picked, score: 0 });
 }
 
 async function pickTrack(music, query) {

@@ -287,10 +287,14 @@ async function runCommand(record, text, userId) {
       record.listeningUntil = 0;
       const answer = await assistant.ask(userId, cmd.text);
       if (answer) {
-        // окно слушания стартует после того, как озвучка закончится
-        await speakUma(record.session, answer, () => {
-          record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
-        });
+        if (config.followupEnabled) {
+          // окно слушания стартует после того, как озвучка закончится
+          await speakUma(record.session, answer, () => {
+            record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
+          });
+        } else {
+          await speakUma(record.session, answer);
+        }
       }
     } catch (err) {
       console.error('Ассистент:', err.message);

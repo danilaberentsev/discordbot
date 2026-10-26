@@ -50,7 +50,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 ## Карта файлов
 
-- `src/index.js` — клиент Discord, регистрация слеш-команд, `handleUtterance`, сессии гильдий, автовыход, сообщение «сейчас играет» с кнопками (`buildNowPlayingContent`/`updateNowPlaying`/`handleNowPlayingButton`).
+- `src/index.js` — клиент Discord, регистрация слеш-команд, `handleUtterance`, сессии гильдий, автовход/автовыход, сообщение «сейчас играет» с кнопками (`buildNowPlayingContent`/`updateNowPlaying`/`handleNowPlayingButton`).
 - `src/config.js` — единственное место чтения env (кроме `dispatch.js`, где ключи GPT читаются для фиксера).
 - `src/voice/session.js` — плеер, очередь, скачивание mp3, TTS-ресурс, громкости.
 - `src/voice/connection.js` — join с `selfDeaf: false`, `debug: true` (debug можно убрать).

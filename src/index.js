@@ -343,10 +343,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   const guildId = oldState?.guild?.id ?? newState?.guild?.id;
   if (!guildId) return;
-  const record = sessions.get(guildId);
-  if (!record) return;
   if (newState.member?.user?.bot) return;
 
+  const record = sessions.get(guildId);
+
+  // авто-вход: разрешённый пользователь зашёл в канал, а бот ещё нигде не подключён
+  if (!record && newState.channelId) {
+    if (config.autojoinUserId && newState.member.id !== config.autojoinUserId) return;
+    const channel = newState.guild.channels.cache.get(newState.channelId);
+    if (channel) getSession(newState.guild, channel, null);
+    return;
+  }
+  if (!record) return;
+
+  // авто-выход: человек ушёл из канала бота, и никого не осталось
   const botChannelId = record.connection.joinConfig.channelId;
   if (oldState.channelId !== botChannelId || newState.channelId === botChannelId) return;
 

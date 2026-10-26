@@ -31,6 +31,7 @@ const assistant = config.cloudApiKey && config.yandexGptFolderId
   ? new Assistant({ apiKey: config.cloudApiKey, folderId: config.yandexGptFolderId })
   : null;
 const LISTEN_WINDOW_MS = 8000;
+const JOIN_GREETING = 'Всем привет!';
 
 const commands = [
   new SlashCommandBuilder().setName('join').setDescription('Позвать Аделину в голосовой канал'),
@@ -100,6 +101,7 @@ function getSession(guild, channel, textChannelId) {
   sessions.set(guild.id, record);
   session.onTrackStart = () => updateNowPlaying(record);
   session.onIdle = () => updateNowPlaying(record);
+  speakUma(record.session, JOIN_GREETING);
   return record;
 }
 

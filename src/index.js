@@ -358,8 +358,16 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   }
   if (!record) return;
 
-  // авто-выход: человек ушёл из канала бота, и никого не осталось
   const botChannelId = record.connection.joinConfig.channelId;
+
+  // пользователь зашёл в канал бота — поздороваться по имени
+  if (oldState.channelId !== botChannelId && newState.channelId === botChannelId) {
+    const name = newState.member.displayName ?? newState.member.user.username;
+    speakUma(record.session, `Привет, ${name}!`);
+    return;
+  }
+
+  // авто-выход: человек ушёл из канала бота, и никого не осталось
   if (oldState.channelId !== botChannelId || newState.channelId === botChannelId) return;
 
   setTimeout(() => {

@@ -48,7 +48,7 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
   const actualQuery = cleanQuery(query);
   if (config.searchApi === 'instant') {
     if (isPlaylistIntent(actualQuery)) return playInstantPlaylist(session, music, stripPlaylistWord(actualQuery));
-    return playInstant(session, music, actualQuery);
+    return playInstant(session, music, actualQuery, fixer);
   }
 
   const primary = await pickTrack(music, actualQuery);
@@ -157,12 +157,34 @@ async function startPicked(session, music, candidate) {
   return `Включаю: ${label}`;
 }
 
-async function playInstant(session, music, query) {
-  const tracks = await music.instantSearch(query);
+async function playInstant(session, music, query, fixer) {
+  let tracks = await music.instantSearch(query);
   console.log(`Поиск instant «${query}»: треков ${tracks.length}`);
+  if (!tracks.length && /[а-яё]/i.test(query)) {
+    tracks = await instantSearchFixed(music, query, fixer);
+  }
   const picked = tracks[0];
   if (!picked) return `Ничего не нашла по запросу ${query}`;
   return startPicked(session, music, { query, picked, score: 0 });
+}
+
+async function instantSearchFixed(music, query, fixer) {
+  const candidates = new Set();
+  if (fixer) {
+    try {
+      const fixed = await fixer(query);
+      if (fixed && cleanQuery(fixed) !== query.toLowerCase()) candidates.add(fixed);
+    } catch (err) {
+      console.log('Фикс запроса не удался:', err.message);
+    }
+  }
+  for (const candidate of translitFallbacks(query)) candidates.add(candidate);
+  for (const candidate of candidates) {
+    const tracks = await music.instantSearch(candidate);
+    console.log(`Поиск instant кандидат «${candidate}»: треков ${tracks.length}`);
+    if (tracks.length) return tracks;
+  }
+  return [];
 }
 
 async function playInstantPlaylist(session, music, query) {

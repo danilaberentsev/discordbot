@@ -7,7 +7,7 @@ import {
 import { Readable } from 'node:stream';
 import { get as httpsGet } from 'node:https';
 
-const MUSIC_VOLUME_DEFAULT = 0.45;
+const MUSIC_VOLUME_DEFAULT = 0.3;
 const TTS_VOLUME_DEFAULT = 2.6;
 
 function clampVolume(value) {
@@ -237,7 +237,11 @@ export class VoiceSession {
   }
 
   changeVolume(delta) {
-    this.musicVolume = clampVolume(this.musicVolume + delta);
+    return this.setVolume(this.musicVolume + delta);
+  }
+
+  setVolume(value) {
+    this.musicVolume = clampVolume(value);
     if (this.current?.kind === 'track') {
       this.currentResource?.volume?.setVolume(this.musicVolume);
     }

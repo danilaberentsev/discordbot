@@ -42,6 +42,14 @@ const commands = [
       .setDescription('Что искать в Яндекс Музыке')
       .setRequired(true)),
   new SlashCommandBuilder().setName('stop').setDescription('Остановить музыку'),
+  new SlashCommandBuilder().setName('volume')
+    .setDescription('Громкость музыки')
+    .addIntegerOption((option) => option
+      .setName('level')
+      .setDescription('Уровень в процентах (5–100)')
+      .setRequired(true)
+      .setMinValue(5)
+      .setMaxValue(100)),
 ].map((command) => command.toJSON());
 
 client.once(Events.ClientReady, async (ready) => {
@@ -139,13 +147,16 @@ function buildNowPlayingContent(record) {
   }
 
   const embed = new EmbedBuilder().setTitle('Плеер').setDescription(description).setColor(color);
+  embed.addFields({ name: '🔊 Громкость', value: `${Math.round(session.musicVolume * 100)}%`, inline: true });
   const toggle = status === AudioPlayerStatus.Paused
-    ? new ButtonBuilder().setCustomId('np:resume').setLabel('▶ Продолжить').setStyle(ButtonStyle.Primary)
-    : new ButtonBuilder().setCustomId('np:pause').setLabel('⏸ Пауза').setStyle(ButtonStyle.Secondary);
+    ? new ButtonBuilder().setCustomId('np:resume').setEmoji('▶️').setStyle(ButtonStyle.Primary)
+    : new ButtonBuilder().setCustomId('np:pause').setEmoji('⏸️').setStyle(ButtonStyle.Secondary);
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('np:stop').setLabel('⏹ Стоп').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('np:stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
     toggle,
-    new ButtonBuilder().setCustomId('np:next').setLabel('⏭ Следующая').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('np:next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('np:voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('np:volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [embed], components: [row] };
 }
@@ -190,6 +201,12 @@ async function handleNowPlayingButton(interaction) {
       break;
     case 'resume':
       record.session.unpause();
+      break;
+    case 'volup':
+      record.session.changeVolume(0.15);
+      break;
+    case 'voldown':
+      record.session.changeVolume(-0.15);
       break;
     default:
       return;
@@ -286,6 +303,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
       case 'stop': {
         sessions.get(interaction.guild.id)?.session.stopPlaying();
         await interaction.reply('Остановила музыку');
+        break;
+      }
+      case 'volume': {
+        const record = sessions.get(interaction.guild.id);
+        if (!record) {
+          await interaction.reply({ content: 'Нет активной сессии', ephemeral: true });
+          return;
+        }
+        const level = interaction.options.getInteger('level', true);
+        const volume = record.session.setVolume(level / 100);
+        await updateNowPlaying(record);
+        await interaction.reply(`Громкость: ${Math.round(volume * 100)}%`);
         break;
       }
       case 'play': {

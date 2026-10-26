@@ -43,6 +43,36 @@ export function cleanQuery(text) {
   return tokens.join(' ').trim();
 }
 
+const NUMBER_WORDS = {
+  ноль: 0, пять: 5, десять: 10, пятнадцать: 15, двадцать: 20,
+  двадцатьпять: 25, тридцать: 30, тридцатьпять: 35, сорок: 40,
+  сорокпять: 45, пятьдесят: 50, пятьдесятпять: 55, шестьдесят: 60,
+  шестьдесятпять: 65, семьдесят: 70, семьдесятпять: 75, восемьдесят: 80,
+  восемьдесятпять: 85, девяносто: 90, девяностопять: 95, сто: 100,
+};
+
+const MAX_WORDS = new Set(['максимум', 'максимальную', 'максимальная', 'максимальный']);
+const MIN_WORDS = new Set(['минимум', 'минимальную', 'минимальная', 'минимальный']);
+
+function parseVolumeLevel(t) {
+  const s = t.trim();
+  let target = s;
+  const m = s.match(/^(?:громкость|звук)\s+(?:на\s+)?(.+)$/);
+  if (m) target = m[1];
+  else if (s.startsWith('на ')) target = s.slice(3);
+
+  if (MAX_WORDS.has(target)) return 1;
+  if (MIN_WORDS.has(target)) return 0.05;
+
+  const raw = target.replace(/процент(?:ов|а|ы)?|%|\s+/g, '');
+  if (/^\d{1,3}$/.test(raw)) {
+    const n = Number(raw);
+    return n >= 0 && n <= 100 ? n / 100 : null;
+  }
+  const word = NUMBER_WORDS[raw];
+  return word !== undefined ? word / 100 : null;
+}
+
 const SPACEGLIDE_QUERY = 'unlike pluto everything black';
 
 const SPACEGLIDE_VARIANTS = [
@@ -85,6 +115,8 @@ export function parseCommand(text) {
   }
   if (/^(тише|потише)$/.test(t)) return { action: 'volume', delta: -0.15 };
   if (/^(громче|погромче)$/.test(t)) return { action: 'volume', delta: 0.15 };
+  const volLevel = parseVolumeLevel(t);
+  if (volLevel !== null) return { action: 'volume', level: volLevel };
   if (t === 'моя волна' || t === 'радио' || isWaveIntent(t)) {
     return { action: 'play', query: '__wave__' };
   }

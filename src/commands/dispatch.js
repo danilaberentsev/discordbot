@@ -27,8 +27,10 @@ export async function runMusicCommand(session, music, cmd) {
       session.skip();
       return 'Переключаю трек';
     case 'volume': {
-      const volume = session.changeVolume(cmd.delta);
-      return volume < 0.3 ? 'Сделала тише' : 'Сделала громче';
+      const volume = cmd.level !== undefined
+        ? session.setVolume(cmd.level)
+        : session.changeVolume(cmd.delta);
+      return `Громкость: ${Math.round(volume * 100)}%`;
     }
     case 'play':
       return playMusic(session, music, cmd.query);

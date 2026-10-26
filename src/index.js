@@ -381,14 +381,19 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     return;
   }
 
-  // авто-выход: человек ушёл из канала бота, и никого не осталось
-  if (oldState.channelId !== botChannelId || newState.channelId === botChannelId) return;
-
-  setTimeout(() => {
+  // пользователь ушёл из канала бота — озвучить и проверить автовыход
+  if (oldState.channelId === botChannelId && newState.channelId !== botChannelId) {
+    const name = oldState.member?.displayName ?? 'кто-то';
     const channel = oldState.guild.channels.cache.get(botChannelId);
     const humans = channel?.members?.filter((member) => !member.user.bot).size ?? 0;
-    if (humans === 0) destroySession(guildId);
-  }, 2000);
+    if (humans > 0) speakUma(record.session, `${name} нас покинул`);
+
+    setTimeout(() => {
+      const ch = oldState.guild.channels.cache.get(botChannelId);
+      const remaining = ch?.members?.filter((member) => !member.user.bot).size ?? 0;
+      if (remaining === 0) destroySession(guildId);
+    }, 2000);
+  }
 });
 
 if (!config.discordToken) {

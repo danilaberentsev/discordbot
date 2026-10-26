@@ -1,12 +1,17 @@
 import 'dotenv/config';
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   Client,
+  EmbedBuilder,
   Events,
   GatewayIntentBits,
   REST,
   Routes,
   SlashCommandBuilder,
 } from 'discord.js';
+import { AudioPlayerStatus } from '@discordjs/voice';
 import { config } from './config.js';
 import { connectToChannel } from './voice/connection.js';
 import { VoiceSession } from './voice/session.js';
@@ -50,9 +55,10 @@ client.once(Events.ClientReady, async (ready) => {
   console.log(`Готова: ${ready.user.tag}`);
 });
 
-function getSession(guild, channel) {
+function getSession(guild, channel, textChannelId) {
   const existing = sessions.get(guild.id);
   if (existing) {
+    if (textChannelId) existing.textChannelId = textChannelId;
     if (existing.connection.joinConfig.channelId !== channel.id) {
       destroySession(guild.id);
     } else {
@@ -73,8 +79,19 @@ function getSession(guild, channel) {
   listener.start();
   const music = config.yandexMusicToken ? new YandexMusicClient(config.yandexMusicToken) : null;
 
-  const record = { connection, session, listener, music, listeningUntil: 0 };
+  const record = {
+    guildId: guild.id,
+    connection,
+    session,
+    listener,
+    music,
+    listeningUntil: 0,
+    textChannelId: textChannelId ?? null,
+    nowPlayingMessage: null,
+  };
   sessions.set(guild.id, record);
+  session.onTrackStart = () => updateNowPlaying(record);
+  session.onIdle = () => updateNowPlaying(record);
   return record;
 }
 
@@ -97,6 +114,87 @@ function destroySession(guildId) {
   } catch (err) {
     console.error('connection.destroy:', err.message);
   }
+  record.nowPlayingMessage?.delete().catch(() => {});
+}
+
+function buildNowPlayingContent(record) {
+  const { session } = record;
+  const current = session.current;
+  const status = session.player.state.status;
+
+  let description;
+  let color;
+  if (current?.kind === 'track') {
+    const label = current.artists ? `${current.artists} — ${current.title}` : current.title;
+    if (status === AudioPlayerStatus.Paused) {
+      description = `⏸ Пауза: ${label}`;
+      color = 0xf1c40f;
+    } else {
+      description = `▶ Играет: ${label}`;
+      color = 0x2ecc71;
+    }
+  } else {
+    description = '⏹ Ничего не играет';
+    color = 0x95a5a6;
+  }
+
+  const embed = new EmbedBuilder().setTitle('Плеер').setDescription(description).setColor(color);
+  const toggle = status === AudioPlayerStatus.Paused
+    ? new ButtonBuilder().setCustomId('np:resume').setLabel('▶ Продолжить').setStyle(ButtonStyle.Primary)
+    : new ButtonBuilder().setCustomId('np:pause').setLabel('⏸ Пауза').setStyle(ButtonStyle.Secondary);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('np:stop').setLabel('⏹ Стоп').setStyle(ButtonStyle.Danger),
+    toggle,
+    new ButtonBuilder().setCustomId('np:next').setLabel('⏭ Следующая').setStyle(ButtonStyle.Secondary),
+  );
+  return { embeds: [embed], components: [row] };
+}
+
+async function updateNowPlaying(record) {
+  if (sessions.get(record.guildId) !== record) return;
+  if (!record.textChannelId) return;
+  const channel = client.channels.cache.get(record.textChannelId);
+  if (!channel) return;
+  const content = buildNowPlayingContent(record);
+  try {
+    if (record.nowPlayingMessage) {
+      await record.nowPlayingMessage.edit(content);
+    } else {
+      record.nowPlayingMessage = await channel.send(content);
+    }
+  } catch (err) {
+    record.nowPlayingMessage = null;
+  }
+}
+
+async function handleNowPlayingButton(interaction) {
+  if (!interaction.customId.startsWith('np:')) return;
+  const action = interaction.customId.slice(3);
+  const record = sessions.get(interaction.guildId);
+  if (!record) {
+    await interaction.reply({ content: 'Нет активной сессии', ephemeral: true }).catch(() => {});
+    return;
+  }
+
+  switch (action) {
+    case 'stop':
+      record.session.stopPlaying();
+      await interaction.deferUpdate().catch(() => {});
+      return;
+    case 'next':
+      record.session.skip();
+      await interaction.deferUpdate().catch(() => {});
+      return;
+    case 'pause':
+      record.session.pause();
+      break;
+    case 'resume':
+      record.session.unpause();
+      break;
+    default:
+      return;
+  }
+  await interaction.update(buildNowPlayingContent(record)).catch(() => {});
 }
 
 async function handleUtterance(guildId, text, userId) {
@@ -162,6 +260,10 @@ async function runCommand(record, text, userId) {
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isButton()) {
+    await handleNowPlayingButton(interaction);
+    return;
+  }
   if (!interaction.isChatInputCommand()) return;
   const voiceChannel = interaction.member?.voice?.channel ?? null;
 
@@ -172,7 +274,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Зайди в голосовой канал, потом зови', ephemeral: true });
           return;
         }
-        getSession(interaction.guild, voiceChannel);
+        getSession(interaction.guild, voiceChannel, interaction.channelId);
         await interaction.reply(`Села в «${voiceChannel.name}».`);
         break;
       }
@@ -191,7 +293,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Сначала зайди в голосовой канал', ephemeral: true });
           return;
         }
-        const record = getSession(interaction.guild, voiceChannel);
+        const record = getSession(interaction.guild, voiceChannel, interaction.channelId);
         await interaction.deferReply();
         const query = interaction.options.getString('query', true);
         const result = await playMusic(record.session, record.music, query);

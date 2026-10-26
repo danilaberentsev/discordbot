@@ -111,6 +111,8 @@ export class VoiceSession {
     this.starting = false;
     this.waveRefill = null;
     this.tts = tts;
+    this.onTrackStart = null;
+    this.onIdle = null;
 
     this.player = createAudioPlayer();
     connection.subscribe(this.player);
@@ -120,6 +122,7 @@ export class VoiceSession {
       const next = this.queue.shift();
       if (next) this.start(next);
       else if (this.waveRefill) this.waveRefill();
+      else this.onIdle?.();
     });
     this.player.on('error', (err) => console.error('Плеер:', err.message));
     this.player.on('stateChange', (oldState, newState) => {
@@ -171,6 +174,7 @@ export class VoiceSession {
       this.current = item;
       this.currentResource = resource;
       this.player.play(resource);
+      if (item.kind === 'track') this.onTrackStart?.(item);
       started = true;
     } catch (err) {
       console.error('Не удалось запустить элемент очереди:', err.message);
@@ -215,6 +219,14 @@ export class VoiceSession {
     if (this.current || this.player.state.status !== AudioPlayerStatus.Idle) {
       this.player.stop(true);
     }
+  }
+
+  pause() {
+    this.player.pause();
+  }
+
+  unpause() {
+    this.player.unpause();
   }
 
   stopPlaying() {

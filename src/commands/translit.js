@@ -13,6 +13,39 @@ export function translit(text) {
   return out;
 }
 
+// обратный транслит (латиница → кириллица), жадное сопоставление по длине
+const REVERSE_MAP = [
+  ['sch', 'щ'], ['zh', 'ж'], ['ch', 'ч'], ['sh', 'ш'], ['ts', 'ц'],
+  ['kh', 'х'], ['yu', 'ю'], ['ya', 'я'],
+  ['a', 'а'], ['b', 'б'], ['c', 'ц'], ['d', 'д'], ['e', 'е'], ['f', 'ф'],
+  ['g', 'г'], ['h', 'х'], ['i', 'и'], ['j', 'дж'], ['k', 'к'], ['l', 'л'],
+  ['m', 'м'], ['n', 'н'], ['o', 'о'], ['p', 'п'], ['r', 'р'], ['s', 'с'],
+  ['t', 'т'], ['u', 'у'], ['v', 'в'], ['w', 'в'], ['x', 'кс'], ['y', 'й'],
+  ['z', 'з'],
+];
+
+export function translitReverse(text) {
+  const s = (text ?? '').toLowerCase();
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    let matched = false;
+    for (const [latin, cyr] of REVERSE_MAP) {
+      if (s.startsWith(latin, i)) {
+        out += cyr;
+        i += latin.length;
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      out += s[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
 // частые оглушения/редукции, которые не ловит ни транслит, ни Левенштейн
 const WORD_CORRECTIONS = {
   blek: 'black',
@@ -34,6 +67,12 @@ export function translitFallbacks(text) {
   add(base.replace(/w/g, 'v'));
   add(base.replace(/dzh/g, 'j'));
   add(base.replace(/dj/g, 'j'));
+
+  // смешанный язык: добавить вариант с латиницей → кириллицей
+  if (/[a-z]/.test(text) && /[а-яё]/.test(text)) {
+    const cyr = translitReverse(base);
+    if (cyr) candidates.add(cyr);
+  }
 
   const tokens = base.split(/\s+/);
   const last = tokens[tokens.length - 1];

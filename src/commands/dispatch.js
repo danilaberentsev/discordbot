@@ -2,16 +2,17 @@ import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
 import { cleanQuery, isWaveIntent } from './parse.js';
 import { scoreTrack, tokenize } from './score.js';
+import { config } from '../config.js';
 
 const CANDIDATE_SCORE_THRESHOLD = 30;
 const LIKES_WEIGHT = 5;
 const WAVE_CHART_LIMIT = 100;
 
 function defaultFixer(query) {
-  if (process.env.YANDEX_CLOUD_API_KEY && process.env.YANDEXGPT_FOLDER_ID) {
+  if (config.cloudApiKey && config.yandexGptFolderId) {
     return fixUtterance(query, {
-      apiKey: process.env.YANDEX_CLOUD_API_KEY,
-      folderId: process.env.YANDEXGPT_FOLDER_ID,
+      apiKey: config.cloudApiKey,
+      folderId: config.yandexGptFolderId,
     });
   }
   return query;
@@ -91,7 +92,7 @@ async function enqueueChart(session, music) {
   const chart = await music.chart(WAVE_CHART_LIMIT);
   if (!chart.length) return 0;
   for (const track of shuffle(chart)) {
-    session.playTrack({ title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
+    session.playTrack({ id: track.id, title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
   }
   return chart.length;
 }
@@ -137,6 +138,7 @@ async function startPicked(session, music, candidate) {
     : `Включаю: ${candidate.picked.title}`;
   if (session.waveRefill) {
     session.playNext({
+      id: candidate.picked.id,
       title: candidate.picked.title,
       artists: candidate.picked.artists,
       announce,
@@ -144,7 +146,7 @@ async function startPicked(session, music, candidate) {
     });
   } else {
     const url = await music.playableUrl(candidate.picked.id);
-    await session.playTrack({ title: candidate.picked.title, artists: candidate.picked.artists, announce, url });
+    await session.playTrack({ id: candidate.picked.id, title: candidate.picked.title, artists: candidate.picked.artists, announce, url });
   }
   console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
   return `Включаю: ${label}`;

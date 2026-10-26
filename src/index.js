@@ -3,6 +3,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   Client,
   EmbedBuilder,
   Events,
@@ -167,7 +168,15 @@ function buildNowPlayingContent(record) {
 
 async function updateNowPlaying(record) {
   if (sessions.get(record.guildId) !== record) return;
-  if (!record.textChannelId) return;
+  if (!record.textChannelId) {
+    // голосовой запуск без текстового канала — берём системный или первый текстовый
+    const guild = client.guilds.cache.get(record.guildId);
+    const fallbackId = guild?.systemChannelId
+      ?? guild?.channels.cache.find((c) => c.type === ChannelType.GuildText)?.id
+      ?? null;
+    if (!fallbackId) return;
+    record.textChannelId = fallbackId;
+  }
   const channel = client.channels.cache.get(record.textChannelId);
   if (!channel) return;
   const content = buildNowPlayingContent(record);

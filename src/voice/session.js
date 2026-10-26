@@ -30,11 +30,31 @@ function bufferStream(buffer, start, onProgress) {
   });
 }
 
+const TRACK_CACHE = new Map();
+const TRACK_CACHE_MAX = 30;
+
+function cacheTrack(id, buffer) {
+  if (!id) return;
+  TRACK_CACHE.delete(id);
+  TRACK_CACHE.set(id, buffer);
+  if (TRACK_CACHE.size > TRACK_CACHE_MAX) {
+    TRACK_CACHE.delete(TRACK_CACHE.keys().next().value);
+  }
+}
+
 async function trackResource(item, volume) {
-  let url = item.url;
-  if (typeof url === 'function') url = await url();
-  if (!item.buffer) item.buffer = await downloadTrack(url);
-  const stream = bufferStream(item.buffer, item.offset ?? 0, (bytes) => {
+  let buffer = item.buffer;
+  if (!buffer && item.id && TRACK_CACHE.has(item.id)) {
+    buffer = TRACK_CACHE.get(item.id);
+  }
+  if (!buffer) {
+    let url = item.url;
+    if (typeof url === 'function') url = await url();
+    buffer = await downloadTrack(url);
+    if (item.id) cacheTrack(item.id, buffer);
+  }
+  item.buffer = buffer;
+  const stream = bufferStream(buffer, item.offset ?? 0, (bytes) => {
     item.offset = bytes;
   });
   const resource = createAudioResource(stream, {

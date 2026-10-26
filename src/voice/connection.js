@@ -6,6 +6,5 @@ export function connectToChannel(channel) {
     guildId: channel.guild.id,
     adapterCreator: channel.guild.voiceAdapterCreator,
     selfDeaf: false,
-    debug: true,
   });
 }

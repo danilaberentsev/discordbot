@@ -1,6 +1,6 @@
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
-import { cleanQuery, isWaveIntent } from './parse.js';
+import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord } from './parse.js';
 import { scoreTrack, tokenize } from './score.js';
 import { config } from '../config.js';
 
@@ -46,7 +46,10 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (wave) return playWave(session, music);
 
   const actualQuery = cleanQuery(query);
-  if (config.searchApi === 'instant') return playInstant(session, music, actualQuery);
+  if (config.searchApi === 'instant') {
+    if (isPlaylistIntent(actualQuery)) return playInstantPlaylist(session, music, stripPlaylistWord(actualQuery));
+    return playInstant(session, music, actualQuery);
+  }
 
   const primary = await pickTrack(music, actualQuery);
 
@@ -160,6 +163,23 @@ async function playInstant(session, music, query) {
   const picked = tracks[0];
   if (!picked) return `Ничего не нашла по запросу ${query}`;
   return startPicked(session, music, { query, picked, score: 0 });
+}
+
+async function playInstantPlaylist(session, music, query) {
+  const playlists = await music.instantPlaylists(query);
+  console.log(`Поиск instant плейлистов «${query}»: ${playlists.length}`);
+  const pl = playlists[0];
+  if (!pl) return `Не нашла плейлист по запросу ${query}`;
+  const tracks = await music.playlistTracks(pl.uid, pl.kind);
+  console.log(`Плейлист «${pl.title}»: ${tracks.length} треков`);
+  if (!tracks.length) return `Плейлист «${pl.title}» пустой`;
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    const item = { id: t.id, title: t.title, artists: t.artists, url: () => music.playableUrl(t.id) };
+    if (i === 0) item.announce = `Включаю плейлист: ${pl.title}`;
+    session.playTrack(item);
+  }
+  return `Включаю плейлист: ${pl.title}`;
 }
 
 async function pickTrack(music, query) {

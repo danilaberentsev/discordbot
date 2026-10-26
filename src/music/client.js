@@ -48,6 +48,28 @@ export class YandexMusicClient {
       .map((r) => this.normalizeTrack(r.track));
   }
 
+  async instantPlaylists(query, { pageSize = 36 } = {}) {
+    const data = await this.request(
+      `/search/instant/mixed?text=${encodeURIComponent(query)}&type=playlist&page=0&pageSize=${pageSize}&withLikesCount=true&withBestResults=true`,
+    );
+    return (data?.result?.results ?? [])
+      .filter((r) => r.type === 'playlist' && r.playlist)
+      .map((r) => ({
+        uid: r.playlist.uid,
+        kind: r.playlist.kind,
+        title: r.playlist.title ?? 'Без названия',
+        trackCount: r.playlist.trackCount ?? 0,
+      }));
+  }
+
+  async playlistTracks(uid, kind) {
+    const data = await this.request(`/users/${uid}/playlists/${kind}`);
+    return (data?.result?.tracks ?? [])
+      .map((item) => item.track)
+      .filter((track) => track && track.available !== false)
+      .map((track) => this.normalizeTrack(track));
+  }
+
   async chart(limit = 50) {
     const data = await this.request('/landing3/chart');
     const tracks = data?.result?.chart?.tracks ?? [];

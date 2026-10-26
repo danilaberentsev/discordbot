@@ -43,6 +43,17 @@ export function cleanQuery(text) {
   return tokens.join(' ').trim();
 }
 
+const PLAYLIST_WORDS = new Set(['плейлист', 'плейлисты', 'плейлиста', 'сборник', 'сборники', 'сборника']);
+
+export function isPlaylistIntent(q) {
+  if (!q) return false;
+  return q.split(' ').some((t) => PLAYLIST_WORDS.has(t));
+}
+
+export function stripPlaylistWord(text) {
+  return text.split(' ').filter((t) => !PLAYLIST_WORDS.has(t)).join(' ').trim();
+}
+
 const NUMBER_WORDS = {
   ноль: 0, пять: 5, десять: 10, пятнадцать: 15, двадцать: 20,
   двадцатьпять: 25, тридцать: 30, тридцатьпять: 35, сорок: 40,

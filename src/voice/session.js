@@ -118,7 +118,9 @@ export class VoiceSession {
     connection.subscribe(this.player);
 
     this.player.on(AudioPlayerStatus.Idle, () => {
+      const finished = this.current;
       this.current = null;
+      finished?.onEnd?.();
       const next = this.queue.shift();
       if (next) this.start(next);
       else if (this.waveRefill) this.waveRefill();
@@ -202,8 +204,8 @@ export class VoiceSession {
     this.waveRefill = fn;
   }
 
-  async speakText(text, { apiKey, voice }) {
-    const item = { kind: 'tts', text, apiKey, voice };
+  async speakText(text, { apiKey, voice, onEnd } = {}) {
+    const item = { kind: 'tts', text, apiKey, voice, onEnd };
     const status = this.player.state.status;
     if (status === AudioPlayerStatus.Idle) {
       this.queue.unshift(item);

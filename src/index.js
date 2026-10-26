@@ -31,6 +31,7 @@ const assistant = config.cloudApiKey && config.yandexGptFolderId
   ? new Assistant({ apiKey: config.cloudApiKey, folderId: config.yandexGptFolderId })
   : null;
 const LISTEN_WINDOW_MS = 8000;
+const FOLLOWUP_WINDOW_MS = 3000;
 const JOIN_GREETING = 'Всем привет!';
 
 const commands = [
@@ -82,8 +83,8 @@ function getSession(guild, channel, textChannelId) {
     language: config.sttLanguage,
     sampleRate: config.sttSampleRate,
     guild,
-    onUtterance: (text, userId) => {
-      handleUtterance(guild.id, text, userId).catch((err) => console.error(err));
+    onUtterance: (text, userId, startedAt) => {
+      handleUtterance(guild.id, text, userId, startedAt).catch((err) => console.error(err));
     },
   });
   listener.start();
@@ -217,7 +218,7 @@ async function handleNowPlayingButton(interaction) {
   await interaction.update(buildNowPlayingContent(record)).catch(() => {});
 }
 
-async function handleUtterance(guildId, text, userId) {
+async function handleUtterance(guildId, text, userId, startedAt) {
   const record = sessions.get(guildId);
   if (!record) return;
   const { matched, rest } = stripWake(text);
@@ -225,7 +226,6 @@ async function handleUtterance(guildId, text, userId) {
   if (matched) {
     console.log(`Голос -> команда: "${rest}" (было: "${text}")`);
     if (rest) {
-      record.listeningUntil = 0;
       await runCommand(record, rest, userId);
     } else {
       record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
@@ -234,11 +234,16 @@ async function handleUtterance(guildId, text, userId) {
     return;
   }
 
-  if (record.listeningUntil && Date.now() < record.listeningUntil) {
-    console.log(`Голос -> команда (без wake): "${text}"`);
-    if (await runCommand(record, text, userId)) {
+  // окно активно, если юзер НАЧАЛ говорить до его истечения
+  if (record.listeningUntil && (startedAt ?? Date.now()) < record.listeningUntil) {
+    // в режиме диалога «хватит»/«стоп»/«все» выключает слушание
+    if (parseCommand(text)?.action === 'stop') {
       record.listeningUntil = 0;
+      await speakUma(record.session, 'Молчу');
+      return;
     }
+    console.log(`Голос -> команда (без wake): "${text}"`);
+    await runCommand(record, text, userId);
   }
 }
 
@@ -258,8 +263,14 @@ async function runCommand(record, text, userId) {
       return true;
     }
     try {
+      record.listeningUntil = 0;
       const answer = await assistant.ask(userId, cmd.text);
-      if (answer) await speakUma(record.session, answer);
+      if (answer) {
+        // окно слушания стартует после того, как озвучка закончится
+        await speakUma(record.session, answer, () => {
+          record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
+        });
+      }
     } catch (err) {
       console.error('Ассистент:', err.message);
       await speakUma(record.session, 'Что-то я тебе не поняла, попробуй ещё раз');
@@ -267,6 +278,8 @@ async function runCommand(record, text, userId) {
     return true;
   }
 
+  // музыкальные команды выключают режим диалога
+  record.listeningUntil = 0;
   try {
     const reply = await runMusicCommand(record.session, record.music, cmd);
     if (reply && !reply.startsWith('Включаю')) {

@@ -73,7 +73,7 @@ export class VoiceListener {
 
   beginUser(userId) {
     if (userId === this.botId || this.users.has(userId)) return;
-    const entry = { sub: null, dec: null, chunks: [], bytes: 0 };
+    const entry = { sub: null, dec: null, chunks: [], bytes: 0, startedAt: Date.now() };
     this.users.set(userId, entry);
 
     if (!this.apiKey) {
@@ -106,6 +106,7 @@ export class VoiceListener {
     const entry = this.users.get(userId);
     if (!entry) return;
     const pcm = Buffer.concat(entry.chunks);
+    const startedAt = entry.startedAt;
     try {
       entry.sub?.destroy();
     } catch {
@@ -127,7 +128,7 @@ export class VoiceListener {
       if (value) {
         const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
         console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${value}`);
-        this.onUtterance?.(value, userId);
+        this.onUtterance?.(value, userId, startedAt);
       }
     }).catch((err) => console.error('STT:', err.message)).finally(() => {
       this.busy.delete(userId);

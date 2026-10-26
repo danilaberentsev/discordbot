@@ -218,6 +218,18 @@ async function handleNowPlayingButton(interaction) {
   await interaction.update(buildNowPlayingContent(record)).catch(() => {});
 }
 
+const FOLLOWUP_STOP_WORDS = new Set([
+  'хватит', 'стоп', 'замолчи', 'замолкни', 'молчи',
+  'прекрати', 'остановись', 'отстань', 'заткнись',
+]);
+
+function hasStopWord(text) {
+  const tokens = (text ?? '').toLowerCase().replaceAll('ё', 'е')
+    .split(/[^a-zа-я0-9]+/)
+    .filter(Boolean);
+  return tokens.some((token) => FOLLOWUP_STOP_WORDS.has(token));
+}
+
 async function handleUtterance(guildId, text, userId, startedAt) {
   const record = sessions.get(guildId);
   if (!record) return;
@@ -236,8 +248,8 @@ async function handleUtterance(guildId, text, userId, startedAt) {
 
   // окно активно, если юзер НАЧАЛ говорить до его истечения
   if (record.listeningUntil && (startedAt ?? Date.now()) < record.listeningUntil) {
-    // в режиме диалога «хватит»/«стоп»/«все» выключает слушание
-    if (parseCommand(text)?.action === 'stop') {
+    // стоп-слово в любом месте фразы («хватит», «замолчи», «прекрати»…) выключает слушание
+    if (hasStopWord(text) || parseCommand(text)?.action === 'stop') {
       record.listeningUntil = 0;
       await speakUma(record.session, 'Молчу');
       return;

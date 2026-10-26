@@ -61,7 +61,7 @@ function getSession(guild, channel) {
   }
 
   const connection = connectToChannel(channel);
-  const session = new VoiceSession(connection);
+  const session = new VoiceSession(connection, { apiKey: config.cloudApiKey, voice: config.ttsVoice });
   const listener = new VoiceListener(connection, client.user.id, {
     apiKey: config.cloudApiKey,
     language: config.sttLanguage,

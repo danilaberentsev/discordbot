@@ -103,13 +103,14 @@ async function ttsResource(text, apiKey, voice) {
 }
 
 export class VoiceSession {
-  constructor(connection) {
+  constructor(connection, tts = {}) {
     this.connection = connection;
     this.musicVolume = MUSIC_VOLUME_DEFAULT;
     this.queue = [];
     this.current = null;
     this.starting = false;
     this.waveRefill = null;
+    this.tts = tts;
 
     this.player = createAudioPlayer();
     connection.subscribe(this.player);
@@ -146,6 +147,14 @@ export class VoiceSession {
   }
 
   async start(item) {
+    if (item.kind === 'track' && item.announce && this.tts?.apiKey) {
+      const announce = item.announce;
+      delete item.announce;
+      this.queue.unshift(item);
+      this.queue.unshift({ kind: 'tts', text: announce, apiKey: this.tts.apiKey, voice: this.tts.voice });
+      this.startNext();
+      return;
+    }
     this.starting = true;
     let started = false;
     try {

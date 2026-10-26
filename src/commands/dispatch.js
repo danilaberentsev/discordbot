@@ -130,15 +130,19 @@ async function albumLikes(music, albumId, cache) {
 
 async function startPicked(session, music, candidate) {
   const label = candidate.picked.artists ? `${candidate.picked.artists} — ${candidate.picked.title}` : candidate.picked.title;
+  const announce = candidate.picked.artists
+    ? `Включаю: ${candidate.picked.artists}, ${candidate.picked.title}`
+    : `Включаю: ${candidate.picked.title}`;
   if (session.waveRefill) {
     session.playNext({
       title: candidate.picked.title,
       artists: candidate.picked.artists,
+      announce,
       url: () => music.playableUrl(candidate.picked.id),
     });
   } else {
     const url = await music.playableUrl(candidate.picked.id);
-    await session.playTrack({ title: candidate.picked.title, artists: candidate.picked.artists, url });
+    await session.playTrack({ title: candidate.picked.title, artists: candidate.picked.artists, announce, url });
   }
   console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
   return `Включаю: ${label}`;

@@ -9,7 +9,7 @@ const MODEL = 'general:rc';
 const LINEAR16_PCM = 1;
 const TEXT_NORMALIZATION_ENABLED = 1;
 const WHITELIST = 1;
-const FULL_DATA = 2;
+const REAL_TIME = 1;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pkgDef = loadSync(join(here, 'proto', 'stt_service.proto'), {
@@ -60,7 +60,7 @@ export function recognizePcmV3(apiKey, pcm, { language = 'ru-RU', sampleRate = 4
             restrictionType: WHITELIST,
             languageCode: [language],
           },
-          audioProcessingType: FULL_DATA,
+          audioProcessingType: REAL_TIME,
         },
         eouClassifier: { externalClassifier: {} },
       },

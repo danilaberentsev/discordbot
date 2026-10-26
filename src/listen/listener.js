@@ -30,18 +30,25 @@ class OpusDecoder extends Transform {
 }
 
 export class VoiceListener {
-  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance } = {}) {
+  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, guild } = {}) {
     this.connection = connection;
     this.botId = botId;
     this.apiKey = apiKey ?? '';
     this.language = language ?? 'ru-RU';
     this.sampleRate = sampleRate ?? 48000;
     this.onUtterance = onUtterance ?? null;
+    this.guild = guild ?? null;
     this.users = new Map();
     this.busy = new Set();
     this.speaking = connection.receiver.speaking;
     this.handleStart = null;
     this.handleStop = null;
+  }
+
+  resolveName(userId) {
+    const member = this.guild?.voiceStates?.cache?.get(userId)?.member
+      ?? this.guild?.members?.cache?.get(userId);
+    return member?.displayName ?? userId;
   }
 
   start() {
@@ -118,7 +125,8 @@ export class VoiceListener {
     });
     text.then((value) => {
       if (value) {
-        console.log(`Услышала (${userId}): ${value}`);
+        const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
+        console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${value}`);
         this.onUtterance?.(value, userId);
       }
     }).catch((err) => console.error('STT:', err.message)).finally(() => {

@@ -81,6 +81,7 @@ function getSession(guild, channel, textChannelId) {
     apiKey: config.cloudApiKey,
     language: config.sttLanguage,
     sampleRate: config.sttSampleRate,
+    guild,
     onUtterance: (text, userId) => {
       handleUtterance(guild.id, text, userId).catch((err) => console.error(err));
     },

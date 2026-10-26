@@ -29,16 +29,6 @@ export class YandexMusicClient {
     return res.json();
   }
 
-  async searchAll(query, limit = 30) {
-    const data = await this.request(
-      `/search?text=${encodeURIComponent(query)}&type=all&page=1&pageSize=${limit}`,
-    );
-    return {
-      best: data?.result?.best ?? null,
-      tracks: (data?.result?.tracks?.results ?? []).map((t) => this.normalizeTrack(t)),
-    };
-  }
-
   async instantSearch(query, { type = 'track', pageSize = 36 } = {}) {
     const data = await this.request(
       `/search/instant/mixed?text=${encodeURIComponent(query)}&type=${type}&page=0&pageSize=${pageSize}&withLikesCount=true&withBestResults=true`,
@@ -74,12 +64,6 @@ export class YandexMusicClient {
     const data = await this.request('/landing3/chart');
     const tracks = data?.result?.chart?.tracks ?? [];
     return tracks.slice(0, limit).map((entry) => this.normalizeTrack(entry.track));
-  }
-
-  async albumTracks(albumId) {
-    const data = await this.request(`/albums/${albumId}/with-tracks`);
-    const tracks = ((data?.result?.volumes ?? [])).flat();
-    return tracks.map((track) => this.normalizeTrack(track));
   }
 
   normalizeTrack(track) {

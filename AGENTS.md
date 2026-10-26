@@ -59,11 +59,10 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/stt/v3.js` — `recognizePcmV3`, gRPC-стриминг SpeechKit v3 (LPCM → `final`/`partial` текст).
 - `src/stt/proto/` — proto-файлы SpeechKit v3 (полный `stt.proto` из cloudapi + урезанный `stt_service.proto`).
 - `src/tts/synthesize.js` — `speakUma(session, text)`, проверяет наличие ключа.
-- `src/music/client.js` — `searchAll` (type=all, нормализует треки), `chart` (топ-чарт), `albumTracks`, `normalizeTrack`, `playableUrl`.
+- `src/music/client.js` — `instantSearch` (instant/mixed, type=track), `instantPlaylists`, `playlistTracks`, `chart` (топ-чарт), `normalizeTrack`, `playableUrl`.
 - `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `isWaveIntent`, `stripWake`, `parseCommand`.
-- `src/commands/score.js` — `scoreTrack`, `tokenize`, `levenshtein` (word-boundary + fuzzy).
-- `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), выбор трека из кандидатов.
-- `src/commands/translit.js` — `translit`, `translitFallbacks`.
+- `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), instant-поиск трека/плейлиста.
+- `src/commands/translit.js` — `translitFallbacks` (транслит-кандидаты для фикса кириллицы).
 - `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
 - `src/assistant/context.js` — история диалога, системный промпт «Аделина».
 
@@ -72,8 +71,8 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 1. **Один AudioPlayer на VoiceConnection.** В `@discordjs/voice` 0.19 второй `connection.subscribe(player)` молча отписывает первый. Музыка и TTS — одна очередь (`kind: 'track' | 'tts'`) в `VoiceSession`. Не добавлять второй плеер.
 2. **Не стримить mp3 напрямую в плеер.** CDN Яндекса рвёт длинные соединения (`terminated` undici / `aborted` https). `downloadTrack()` качает файл целиком в память, затем играет; обязательно следовать 3xx (`get-mp3` отдаёт 308).
 3. **Громкость через `resource.volume.setVolume`** (в 0.19 нет `volumeTransformer`). Музыка `MUSIC_VOLUME_DEFAULT = 0.3`, TTS `TTS_VOLUME_DEFAULT = 1.6`.
-4. **STT — v3 gRPC-стриминг, фолбэк на v1 HTTP.** v3 — bidirectional gRPC `speechkit.stt.v3.Recognizer/RecognizeStreaming` на `stt.api.cloud.yandex.net:443`, авторизация через metadata `authorization: Api-Key <key>`, аудио raw LPCM 16-bit. WebSocket-эндпоинты (хосты `transcribe.api.cloud.yandex.net`) отдают 403 — это v2 async REST, не использовать и не возвращать WS-код. При ошибке v3 `src/stt/session.js` падает на v1 `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`.
-5. **Поиск: `type=all` и блок `best`.** `type=track` не находит часть каталога (пример: Unlike Pluto — Everything Black). Если `best.type === 'album'` — тянуть треки через `/albums/{id}/with-tracks` (не `/albums/{id}/tracks` — 404 для синглов). Если `best.type` — не track/album и треков нет, возвращать `null` (иначе падение на `undefined.artists`).
+4. **STT — v3 gRPC-стриминг, фолбэк на v1 HTTP.** v3 — bidirectional gRPC `speechkit.stt.v3.Recognizer/RecognizeStreaming` на `stt.api.cloud.yandex.net:443`, авторизация через metadata `authorization: Api-Key <key>`, аудио raw LPCM 16-bit, `audioProcessingType: REAL_TIME` (не `FULL_DATA` — длинная фраза упрётся в дедлайн 15с). WebSocket-эндпоинты (хосты `transcribe.api.cloud.yandex.net`) отдают 403 — это v2 async REST, не использовать и не возвращать WS-код. При ошибке v3 `src/stt/session.js` падает на v1 `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`.
+5. **Поиск — через `instant/mixed`, берём первый результат.** Треки: `/search/instant/mixed?type=track` → первый трек. Плейлисты: `type=playlist` → первый плейлист → треки `/users/{uid}/playlists/{kind}`. Ранжирование целиком на API, своего скоринга нет. Кириллический запрос с 0 треков → GPT-фикс + `translitFallbacks`, переспросить instant.
 6. **Ссылка на mp3 из `download-info` живёт ~1 минуту**; формула: `md5(SIGN_SALT + path.slice(1) + s)`, URL `https://{host}/get-mp3/{sign}/{ts}{path}`. Заголовок `X-Yandex-Music-Client` обязателен для download-info.
 7. **Wake-слова берутся из `.env`**, если переменная задана — она переопределяет дефолт в `config.js`. При смене wake-слова проверять `.env`, а не только код.
 8. **TTS v1 НЕ поддерживает `profanityFilter`** (400 unexpected field). Не добавлять этот параметр.
@@ -81,14 +80,12 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 10. **Флаг `starting` в `VoiceSession` обязателен.** `start()` асинхронный (качает трек), а `player.state.status` остаётся `Idle` во время загрузки. Без `starting` `startNext()` при добавлении очереди запускает все треки разом (каждый выхватывает следующий из очереди), и 9 из 10 отбрасываются как «не Idle». `startNext()` не должен запускать новый трек, пока `start()` не завершился.
 11. **Озвучка названия трека через поле `announce`.** У трек-элемента может быть поле `announce` (строка). В `start()` при его наличии и заданном `this.tts.apiKey` перед треком в очередь вставляется TTS с этим текстом, само поле удаляется (чтобы не зациклиться). Так конкретный трек объявляется голосом в момент своего старта — работает и для волны, где трек ставится следующим.
 
-## Особенности выбора трека (dispatch.js)
+## Особенности поиска (dispatch.js)
 
-- Сначала `pickTrack` по исходному запросу (запрос чистится `cleanQuery` от филлеров «мне», «пожалуйста», «песню», «трек», «музыку»).
-- `scoreTrack` (`src/commands/score.js`): +100 за точное совпадение названия, +70 за фразу внутри названия, +40 за фразу в исполнителе, до +15/+8 за каждый токен (title/artist) с fuzzy-совпадением по Левенштейну (порог 0.75). Совпадение по границам слов — «black» не матчит «blackout».
-- `best.type === 'album'` — треки альбома скорятся против запроса, берётся лучший (не `[0]`). `best.type === 'track'` — сравнивается со скорингом списка `tracks`, берётся лучший.
-- Если score < 30 (или результата нет) — кандидаты: GPT-фикс запроса (`fixUtterance`) + `translitFallbacks`. Кандидаты идут параллельно (`Promise.allSettled`).
-- Победитель: `rank = score + log10(лайки альбома + 1) * 5`. Score теперь доминирует, лайки только разбивают ничьи у одноимённых треков (рабочий пример: «еверифинк блек» → Unlike Pluto — Everything Black, а не ARCHANGELZZ).
-- `best` в API нестабилен между запросами, поэтому нельзя полагаться на единственный вызов.
+- Поиск идёт через instant/mixed (`instantSearch`, type=track) и **берётся первый трек** — ранжирование целиком на API, своего скоринга нет. Запрос предварительно чистится `cleanQuery` от филлеров.
+- Если instant вернул 0 треков и в запросе есть кириллица — `instantSearchFixed`: GPT-фикс (`fixUtterance`) + `translitFallbacks`, кандидаты по очереди переспрашивают instant, берётся первый непустой результат. Кириллическая транскрипция английского («еверифинк блек») превращается в точную латиницу («everything black»).
+- Плейлист: ключевое слово «плейлист» (`isPlaylistIntent`) → `instantPlaylists` (type=playlist) → первый плейлист → `playlistTracks` → треки в очередь.
+- instant/mixed почти строгий: транслит без GPT не матчит (`everifink black` → 0 треков) — нужна точная латиница из GPT. Русские запросы находят сразу, GPT не зовётся.
 - Смешанные запросы («poli сестра») — известная слабость: непонятно, какой язык/написание нужно. Улучшения приветствуются, но проверяй на реальном API.
 
 ## «Просто музыка» (волна)
@@ -100,7 +97,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 ## Логи и отладка
 
-Ключевые строки: `Услышала (id)`, `Голос -> команда`, `Поиск «...»: треков N, best ...`, `Кандидат «...»`, `Выбран трек`, `[player]`, `[voice]`.
+Ключевые строки: `Услышала (id)`, `Голос -> команда`, `Поиск instant «...»: треков N`, `Поиск instant кандидат «...»`, `Поиск instant плейлистов «...»`, `Плейлист «...»: N треков`, `Выбран трек`, `[player]`, `[voice]`.
 
 Probe-интервал в `VoiceSession` закомментирован — при отладке звука можно временно включить.
 
@@ -108,7 +105,6 @@ Probe-интервал в `VoiceSession` закомментирован — пр
 
 - Кэш скачанных mp3 (сейчас каждый раз качается заново).
 - «Смешанный язык» запросов (латиница + кириллица в одном названии).
-- `dispatch.js` читает env напрямую для GPT-фиксера — при рефакторинге перенести в `config.js`.
 - Убрать `debug: true` из `voice/connection.js` перед продакшеном.
 - Нет тестов; при добавлении — Vitest/Jest не настроены, выбирать осознанно.
 - Пакет всё ещё называется `discordbot-alisa`, бот — «Аделина».

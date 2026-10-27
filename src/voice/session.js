@@ -123,28 +123,33 @@ async function ttsResource(text, apiKey, voice) {
   return resource;
 }
 
-// короткий двухтональный «динь» (stereo 16-bit LE, 48k) для отклика на wake-слово
+// мягкий колокольчик (stereo 16-bit LE, 48k) для отклика на wake-слово
 let chimeBuffer = null;
 function getChimeBuffer() {
   if (chimeBuffer) return chimeBuffer;
   const sampleRate = 48000;
-  const tones = [
-    { freq: 880, start: 0, dur: 0.14 },
-    { freq: 1318.51, start: 0.13, dur: 0.16 },
+  const notes = [
+    { freq: 659.25, start: 0, dur: 0.22 },    // E5
+    { freq: 987.77, start: 0.11, dur: 0.22 }, // B5 (квинта)
   ];
-  const n = Math.floor(sampleRate * 0.3);
+  const total = 0.33;
+  const n = Math.floor(sampleRate * total);
   const buf = Buffer.alloc(n * 4);
+  const decay = 22;
   for (let i = 0; i < n; i++) {
     const t = i / sampleRate;
     let s = 0;
-    for (const { freq, start, dur } of tones) {
+    for (const { freq, start, dur } of notes) {
       if (t >= start && t < start + dur) {
         const x = t - start;
-        const env = Math.min(1, x / 0.005, (dur - x) / 0.04);
-        s += Math.sin(2 * Math.PI * freq * x) * env;
+        const env = Math.min(1, x / 0.004) * Math.exp(-x * decay);
+        const tone = Math.sin(2 * Math.PI * freq * x)
+          + 0.35 * Math.sin(2 * Math.PI * freq * 2 * x)
+          + 0.12 * Math.sin(2 * Math.PI * freq * 3 * x);
+        s += tone * env;
       }
     }
-    const v = Math.max(-1, Math.min(1, s * 0.5));
+    const v = Math.max(-1, Math.min(1, s * 0.55));
     const s16 = Math.round(v * 32767);
     buf.writeInt16LE(s16, i * 4);
     buf.writeInt16LE(s16, i * 4 + 2);

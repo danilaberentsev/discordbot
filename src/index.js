@@ -168,9 +168,25 @@ function buildNowPlayingContent(record) {
 
 async function updateNowPlaying(record) {
   if (sessions.get(record.guildId) !== record) return;
+
+  // плеер показываем только пока играет музыка (в current лежит трек)
+  if (record.session.current?.kind !== 'track') {
+    if (record.nowPlayingMessage) {
+      try {
+        await record.nowPlayingMessage.delete();
+      } catch {
+      }
+      record.nowPlayingMessage = null;
+    }
+    return;
+  }
+
+  const guild = client.guilds.cache.get(record.guildId);
+  // плеер всегда пишется в канал spam
+  const spam = guild?.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === 'spam');
+  if (spam) record.textChannelId = spam.id;
   if (!record.textChannelId) {
     // голосовой запуск без текстового канала — берём системный или первый текстовый
-    const guild = client.guilds.cache.get(record.guildId);
     const fallbackId = guild?.systemChannelId
       ?? guild?.channels.cache.find((c) => c.type === ChannelType.GuildText)?.id
       ?? null;

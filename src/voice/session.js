@@ -7,7 +7,7 @@ import {
 import { Readable } from 'node:stream';
 import { get as httpsGet } from 'node:https';
 
-const MUSIC_VOLUME_DEFAULT = 0.3;
+const MUSIC_VOLUME_DEFAULT = 0.20;
 const TTS_VOLUME_DEFAULT = 2.6;
 
 function clampVolume(value) {

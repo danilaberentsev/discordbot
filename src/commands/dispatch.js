@@ -2,6 +2,7 @@ import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
 import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord } from './parse.js';
 import { config } from '../config.js';
+import { speakUma } from '../tts/synthesize.js';
 
 const WAVE_CHART_LIMIT = 100;
 
@@ -100,11 +101,19 @@ async function startPicked(session, music, picked) {
     id: picked.id,
     title: picked.title,
     artists: picked.artists,
-    announce,
     url: () => music.playableUrl(picked.id),
   };
-  if (session.waveRefill) session.playNext(item);
-  else await session.playTrack(item);
+  if (session.current?.kind === 'track') {
+    // музыка играет — кладём в очередь и объявляем сразу
+    if (session.waveRefill) session.playNext(item);
+    else await session.playTrack(item);
+    await speakUma(session, announce);
+  } else {
+    // ничего не играет — announce сыграет прямо перед треком
+    item.announce = announce;
+    if (session.waveRefill) session.playNext(item);
+    else await session.playTrack(item);
+  }
   console.log(`Выбран трек: ${label} (id ${picked.id})`);
   return `Включаю: ${label}`;
 }
@@ -147,11 +156,14 @@ async function playInstantPlaylist(session, music, query) {
   const tracks = await music.playlistTracks(pl.uid, pl.kind);
   console.log(`Плейлист «${pl.title}»: ${tracks.length} треков`);
   if (!tracks.length) return `Плейлист «${pl.title}» пустой`;
+  const announce = `Включаю плейлист: ${pl.title}`;
+  const playing = session.current?.kind === 'track';
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
     const item = { id: t.id, title: t.title, artists: t.artists, url: () => music.playableUrl(t.id) };
-    if (i === 0) item.announce = `Включаю плейлист: ${pl.title}`;
+    if (i === 0 && !playing) item.announce = announce;
     session.playTrack(item);
   }
+  if (playing) await speakUma(session, announce);
   return `Включаю плейлист: ${pl.title}`;
 }

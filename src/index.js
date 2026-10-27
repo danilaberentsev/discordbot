@@ -154,10 +154,10 @@ function buildNowPlayingContent(record) {
   const embed = new EmbedBuilder().setTitle('Плеер').setDescription(description).setColor(color);
   embed.addFields({ name: '🔊 Громкость', value: `${Math.round(session.musicVolume * 100)}%`, inline: true });
   const toggle = status === AudioPlayerStatus.Paused
-    ? new ButtonBuilder().setCustomId('np:resume').setEmoji('▶️').setStyle(ButtonStyle.Primary)
+    ? new ButtonBuilder().setCustomId('np:resume').setEmoji('▶️').setStyle(ButtonStyle.Secondary)
     : new ButtonBuilder().setCustomId('np:pause').setEmoji('⏸️').setStyle(ButtonStyle.Secondary);
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('np:stop').setEmoji('⏹️').setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId('np:stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary),
     toggle,
     new ButtonBuilder().setCustomId('np:next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('np:voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
@@ -168,9 +168,25 @@ function buildNowPlayingContent(record) {
 
 async function updateNowPlaying(record) {
   if (sessions.get(record.guildId) !== record) return;
+
+  // плеер показываем только пока играет музыка (в current лежит трек)
+  if (record.session.current?.kind !== 'track') {
+    if (record.nowPlayingMessage) {
+      try {
+        await record.nowPlayingMessage.delete();
+      } catch {
+      }
+      record.nowPlayingMessage = null;
+    }
+    return;
+  }
+
+  const guild = client.guilds.cache.get(record.guildId);
+  // плеер всегда пишется в канал spam
+  const spam = guild?.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name.toLowerCase() === 'spam');
+  if (spam) record.textChannelId = spam.id;
   if (!record.textChannelId) {
     // голосовой запуск без текстового канала — берём системный или первый текстовый
-    const guild = client.guilds.cache.get(record.guildId);
     const fallbackId = guild?.systemChannelId
       ?? guild?.channels.cache.find((c) => c.type === ChannelType.GuildText)?.id
       ?? null;
@@ -222,6 +238,7 @@ async function handleNowPlayingButton(interaction) {
       record.session.changeVolume(-0.15);
       break;
     default:
+      await interaction.deferUpdate().catch(() => {});
       return;
   }
   await interaction.update(buildNowPlayingContent(record)).catch(() => {});

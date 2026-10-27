@@ -29,14 +29,35 @@ export class YandexMusicClient {
     return res.json();
   }
 
-  async searchAll(query, limit = 30) {
+  async instantSearch(query, { type = 'track', pageSize = 36 } = {}) {
     const data = await this.request(
-      `/search?text=${encodeURIComponent(query)}&type=all&page=1&pageSize=${limit}`,
+      `/search/instant/mixed?text=${encodeURIComponent(query)}&type=${type}&page=0&pageSize=${pageSize}&withLikesCount=true&withBestResults=true`,
     );
-    return {
-      best: data?.result?.best ?? null,
-      tracks: (data?.result?.tracks?.results ?? []).map((t) => this.normalizeTrack(t)),
-    };
+    return (data?.result?.results ?? [])
+      .filter((r) => r.type === 'track' && r.track)
+      .map((r) => this.normalizeTrack(r.track));
+  }
+
+  async instantPlaylists(query, { pageSize = 36 } = {}) {
+    const data = await this.request(
+      `/search/instant/mixed?text=${encodeURIComponent(query)}&type=playlist&page=0&pageSize=${pageSize}&withLikesCount=true&withBestResults=true`,
+    );
+    return (data?.result?.results ?? [])
+      .filter((r) => r.type === 'playlist' && r.playlist)
+      .map((r) => ({
+        uid: r.playlist.uid,
+        kind: r.playlist.kind,
+        title: r.playlist.title ?? 'Без названия',
+        trackCount: r.playlist.trackCount ?? 0,
+      }));
+  }
+
+  async playlistTracks(uid, kind) {
+    const data = await this.request(`/users/${uid}/playlists/${kind}`);
+    return (data?.result?.tracks ?? [])
+      .map((item) => item.track)
+      .filter((track) => track && track.available !== false)
+      .map((track) => this.normalizeTrack(track));
   }
 
   async chart(limit = 50) {
@@ -45,16 +66,9 @@ export class YandexMusicClient {
     return tracks.slice(0, limit).map((entry) => this.normalizeTrack(entry.track));
   }
 
-  async albumTracks(albumId) {
-    const data = await this.request(`/albums/${albumId}/with-tracks`);
-    const tracks = ((data?.result?.volumes ?? [])).flat();
-    return tracks.map((track) => this.normalizeTrack(track));
-  }
-
   normalizeTrack(track) {
     return {
       id: track.id,
-      albumId: track.albums?.[0]?.id ?? null,
       title: track.title ?? 'Без названия',
       artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(', '),
       durationMs: track.durationMs ?? 0,

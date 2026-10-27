@@ -7,7 +7,7 @@ import {
 import { Readable } from 'node:stream';
 import { get as httpsGet } from 'node:https';
 
-const MUSIC_VOLUME_DEFAULT = 0.3;
+const MUSIC_VOLUME_DEFAULT = 0.20;
 const TTS_VOLUME_DEFAULT = 2.6;
 
 function clampVolume(value) {
@@ -129,6 +129,7 @@ export class VoiceSession {
     this.queue = [];
     this.current = null;
     this.starting = false;
+    this.startToken = 0;
     this.waveRefill = null;
     this.tts = tts;
     this.onTrackStart = null;
@@ -157,11 +158,6 @@ export class VoiceSession {
         console.log(`[voice] ${oldState.status} -> ${newState.status}`);
       }
     });
-    // this.probe = setInterval(() => {
-    //   console.log(
-    //     `[probe] conn=${this.connection.state.status} subs=${this.player.subscribers.length} player=${this.player.state.status}`,
-    //   );
-    // }, 1000);
   }
 
   startNext() {
@@ -180,13 +176,14 @@ export class VoiceSession {
       this.startNext();
       return;
     }
+    const token = ++this.startToken;
     this.starting = true;
     let started = false;
     try {
       const resource = item.kind === 'tts'
         ? await ttsResource(item.text, item.apiKey, item.voice)
         : await trackResource(item, this.musicVolume);
-      if (this.player.state.status !== AudioPlayerStatus.Idle) {
+      if (token !== this.startToken || this.player.state.status !== AudioPlayerStatus.Idle) {
         try {
           resource.playStream.destroy();
         } catch {
@@ -228,6 +225,7 @@ export class VoiceSession {
     const item = { kind: 'tts', text, apiKey, voice, onEnd };
     const status = this.player.state.status;
     if (status === AudioPlayerStatus.Idle) {
+      if (this.starting) this.startToken++;
       this.queue.unshift(item);
       this.startNext();
       return;
@@ -238,6 +236,7 @@ export class VoiceSession {
   }
 
   skip() {
+    this.startToken++;
     if (this.current || this.player.state.status !== AudioPlayerStatus.Idle) {
       this.player.stop(true);
     }
@@ -253,7 +252,8 @@ export class VoiceSession {
 
   stopPlaying() {
     this.waveRefill = null;
-    this.queue = this.queue.filter((item) => item.kind === 'tts');
+    this.startToken++;
+    this.queue = [];
     this.current = null;
     this.player.stop(true);
   }
@@ -271,7 +271,9 @@ export class VoiceSession {
   }
 
   destroy() {
-    clearInterval(this.probe);
+    this.startToken++;
+    this.queue = [];
+    this.waveRefill = null;
     try {
       this.player.stop(true);
     } catch {

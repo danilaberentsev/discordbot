@@ -1,11 +1,9 @@
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
-import { cleanQuery, isWaveIntent } from './parse.js';
-import { scoreTrack, tokenize } from './score.js';
+import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord } from './parse.js';
 import { config } from '../config.js';
+import { speakUma } from '../tts/synthesize.js';
 
-const CANDIDATE_SCORE_THRESHOLD = 30;
-const LIKES_WEIGHT = 5;
 const WAVE_CHART_LIMIT = 100;
 
 function defaultFixer(query) {
@@ -46,37 +44,8 @@ export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (wave) return playWave(session, music);
 
   const actualQuery = cleanQuery(query);
-  const primary = await pickTrack(music, actualQuery);
-
-  if ((!primary || primary.score < CANDIDATE_SCORE_THRESHOLD) && /[a-zа-яё]/i.test(actualQuery)) {
-    const candidateQueries = new Set();
-    if (fixer) {
-      try {
-        const fixed = await fixer(actualQuery);
-        if (fixed && cleanQuery(fixed) !== actualQuery.toLowerCase()) candidateQueries.add(fixed);
-      } catch (err) {
-        console.log('Фикс запроса не удался:', err.message);
-      }
-    }
-    for (const candidate of translitFallbacks(actualQuery)) candidateQueries.add(candidate);
-
-    const alts = primary ? [primary] : [];
-    const settled = await Promise.allSettled([...candidateQueries].map((c) => pickTrack(music, c)));
-    for (const result of settled) {
-      if (result.status === 'fulfilled' && result.value) alts.push(result.value);
-    }
-    if (!alts.length) return `Ничего не нашла по запросу ${actualQuery}`;
-
-    const likesCache = new Map();
-    await Promise.all(alts.map(async (alt) => {
-      const likes = await albumLikes(music, alt.picked.albumId, likesCache);
-      alt.rank = alt.score + Math.log10((likes ?? 0) + 1) * LIKES_WEIGHT;
-      console.log(`Кандидат «${alt.query}»: score=${alt.score}, лайков=${likes ?? '?'} -> ${alt.picked.artists} — ${alt.picked.title}`);
-    }));
-    const winner = alts.reduce((best, alt) => (alt.rank > best.rank ? alt : best));
-    return startPicked(session, music, winner);
-  }
-  return startPicked(session, music, primary);
+  if (isPlaylistIntent(actualQuery)) return playInstantPlaylist(session, music, stripPlaylistWord(actualQuery));
+  return playInstant(session, music, actualQuery, fixer);
 }
 
 function shuffle(items) {
@@ -99,10 +68,15 @@ async function enqueueChart(session, music) {
 
 async function playWave(session, music) {
   const refill = async () => {
+    let count = 0;
     try {
-      await enqueueChart(session, music);
+      count = await enqueueChart(session, music);
     } catch (err) {
       console.error('Волна: не удалось догрузить чарт:', err.message);
+    }
+    if (!count) {
+      session.setWaveRefill(null);
+      session.onIdle?.();
     }
   };
   let count;
@@ -118,75 +92,78 @@ async function playWave(session, music) {
   return 'Включаю: популярные треки';
 }
 
-async function albumLikes(music, albumId, cache) {
-  if (!albumId || cache.has(albumId)) return cache.get(albumId) ?? null;
-  try {
-    const data = await music.request(`/albums/${albumId}`);
-    const likes = data?.result?.likesCount ?? null;
-    cache.set(albumId, likes);
-    return likes;
-  } catch {
-    cache.set(albumId, null);
-    return null;
-  }
-}
-
-async function startPicked(session, music, candidate) {
-  const label = candidate.picked.artists ? `${candidate.picked.artists} — ${candidate.picked.title}` : candidate.picked.title;
-  const announce = candidate.picked.artists
-    ? `Включаю: ${candidate.picked.artists}, ${candidate.picked.title}`
-    : `Включаю: ${candidate.picked.title}`;
-  if (session.waveRefill) {
-    session.playNext({
-      id: candidate.picked.id,
-      title: candidate.picked.title,
-      artists: candidate.picked.artists,
-      announce,
-      url: () => music.playableUrl(candidate.picked.id),
-    });
+async function startPicked(session, music, picked) {
+  const label = picked.artists ? `${picked.artists} — ${picked.title}` : picked.title;
+  const announce = picked.artists
+    ? `Включаю: ${picked.artists}, ${picked.title}`
+    : `Включаю: ${picked.title}`;
+  const item = {
+    id: picked.id,
+    title: picked.title,
+    artists: picked.artists,
+    url: () => music.playableUrl(picked.id),
+  };
+  if (session.current?.kind === 'track') {
+    // музыка играет — кладём в очередь и объявляем сразу
+    if (session.waveRefill) session.playNext(item);
+    else await session.playTrack(item);
+    await speakUma(session, announce);
   } else {
-    const url = await music.playableUrl(candidate.picked.id);
-    await session.playTrack({ id: candidate.picked.id, title: candidate.picked.title, artists: candidate.picked.artists, announce, url });
+    // ничего не играет — announce сыграет прямо перед треком
+    item.announce = announce;
+    if (session.waveRefill) session.playNext(item);
+    else await session.playTrack(item);
   }
-  console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
+  console.log(`Выбран трек: ${label} (id ${picked.id})`);
   return `Включаю: ${label}`;
 }
 
-async function pickTrack(music, query) {
-  let searchQuery = query;
-  let { best, tracks } = await music.searchAll(searchQuery);
-  console.log(`Поиск «${searchQuery}»: треков ${tracks.length}, best ${best ? best.type : 'null'}`);
-  const tokens = tokenize(searchQuery);
-  while (!tracks.length && !best && tokens.length > 1) {
-    tokens.pop();
-    searchQuery = tokens.join(' ');
-    ({ best, tracks } = await music.searchAll(searchQuery));
-    console.log(`Поиск с урезанным запросом «${searchQuery}»: треков ${tracks.length}`);
+async function playInstant(session, music, query, fixer) {
+  let tracks = await music.instantSearch(query);
+  console.log(`Поиск instant «${query}»: треков ${tracks.length}`);
+  if (!tracks.length && /[а-яё]/i.test(query)) {
+    tracks = await instantSearchFixed(music, query, fixer);
   }
-  if (!tracks.length && !best) return null;
+  const picked = tracks[0];
+  if (!picked) return `Ничего не нашла по запросу ${query}`;
+  return startPicked(session, music, picked);
+}
 
-  let picked;
-  if (best?.type === 'album' && best.result?.id) {
-    const album = await music.albumTracks(best.result.id);
-    console.log(`Взят best-альбом «${best.result.title}» (${album.length} треков)`);
-    const scored = album.map((t) => ({ t, s: scoreTrack(t, query) }));
-    scored.sort((a, b) => b.s - a.s);
-    picked = scored.length && scored[0].s > 0 ? scored[0].t : album[0];
-  } else if (best?.type === 'track' && best.result) {
-    const bestTrack = music.normalizeTrack(best.result);
-    const topFromList = tracks.length
-      ? [...tracks].sort((a, b) => scoreTrack(b, query) - scoreTrack(a, query))[0]
-      : null;
-    const bestScore = scoreTrack(bestTrack, query);
-    const listScore = topFromList ? scoreTrack(topFromList, query) : -1;
-    picked = listScore > bestScore ? topFromList : bestTrack;
-  } else if (tracks.length) {
-    picked = [...tracks].sort((a, b) => scoreTrack(b, query) - scoreTrack(a, query))[0];
-  } else {
-    return null;
+async function instantSearchFixed(music, query, fixer) {
+  const candidates = new Set();
+  if (fixer) {
+    try {
+      const fixed = await fixer(query);
+      if (fixed && cleanQuery(fixed) !== query.toLowerCase()) candidates.add(fixed);
+    } catch (err) {
+      console.log('Фикс запроса не удался:', err.message);
+    }
   }
+  for (const candidate of translitFallbacks(query)) candidates.add(candidate);
+  for (const candidate of candidates) {
+    const tracks = await music.instantSearch(candidate);
+    console.log(`Поиск instant кандидат «${candidate}»: треков ${tracks.length}`);
+    if (tracks.length) return tracks;
+  }
+  return [];
+}
 
-  if (!picked) return null;
-  const score = scoreTrack(picked, query);
-  return { query, picked, score };
+async function playInstantPlaylist(session, music, query) {
+  const playlists = await music.instantPlaylists(query);
+  console.log(`Поиск instant плейлистов «${query}»: ${playlists.length}`);
+  const pl = playlists[0];
+  if (!pl) return `Не нашла плейлист по запросу ${query}`;
+  const tracks = await music.playlistTracks(pl.uid, pl.kind);
+  console.log(`Плейлист «${pl.title}»: ${tracks.length} треков`);
+  if (!tracks.length) return `Плейлист «${pl.title}» пустой`;
+  const announce = `Включаю плейлист: ${pl.title}`;
+  const playing = session.current?.kind === 'track';
+  for (let i = 0; i < tracks.length; i++) {
+    const t = tracks[i];
+    const item = { id: t.id, title: t.title, artists: t.artists, url: () => music.playableUrl(t.id) };
+    if (i === 0 && !playing) item.announce = announce;
+    session.playTrack(item);
+  }
+  if (playing) await speakUma(session, announce);
+  return `Включаю плейлист: ${pl.title}`;
 }

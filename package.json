@@ -6,8 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js",
-    "search-ui": "node scripts/search-ui.js"
+    "dev": "nodemon src/index.js"
   },
   "engines": {
     "node": ">=20"

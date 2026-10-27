@@ -2,6 +2,8 @@ import { EndBehaviorType } from '@discordjs/voice';
 import { Transform } from 'node:stream';
 import OpusScript from 'opusscript';
 import { recognizePcm } from '../stt/session.js';
+import { createRecognizer } from '../stt/v3.js';
+import { hasWakeWord } from '../commands/parse.js';
 
 class OpusDecoder extends Transform {
   constructor(rate) {
@@ -28,13 +30,14 @@ class OpusDecoder extends Transform {
 }
 
 export class VoiceListener {
-  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, guild } = {}) {
+  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, onWake, guild } = {}) {
     this.connection = connection;
     this.botId = botId;
     this.apiKey = apiKey ?? '';
     this.language = language ?? 'ru-RU';
     this.sampleRate = sampleRate ?? 48000;
     this.onUtterance = onUtterance ?? null;
+    this.onWake = onWake ?? null;
     this.guild = guild ?? null;
     this.users = new Map();
     this.busy = new Set();
@@ -52,7 +55,9 @@ export class VoiceListener {
   start() {
     if (this.handleStart) return;
     this.handleStart = (userId) => this.beginUser(userId);
-    this.handleStop = (userId) => this.endUser(userId);
+    this.handleStop = (userId) => {
+      this.endUser(userId).catch((err) => console.error('endUser:', err.message));
+    };
     this.speaking.on('start', this.handleStart);
     this.speaking.on('end', this.handleStop);
   }
@@ -71,7 +76,9 @@ export class VoiceListener {
 
   beginUser(userId) {
     if (userId === this.botId || this.users.has(userId)) return;
-    const entry = { sub: null, dec: null, chunks: [], bytes: 0, startedAt: Date.now() };
+    const entry = {
+      sub: null, dec: null, recognizer: null, chunks: [], bytes: 0, startedAt: Date.now(), wakeFired: false,
+    };
     this.users.set(userId, entry);
 
     if (!this.apiKey) {
@@ -82,12 +89,25 @@ export class VoiceListener {
 
     try {
       const sub = this.connection.receiver.subscribe(userId, {
-        end: { behavior: EndBehaviorType.AfterSilence, duration: 700 },
+        end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
       });
+      const recognizer = createRecognizer(this.apiKey, {
+        language: this.language,
+        sampleRate: this.sampleRate,
+        onPartial: (text) => {
+          if (!entry.wakeFired && hasWakeWord(text)) {
+            entry.wakeFired = true;
+            this.onWake?.(userId);
+          }
+        },
+      });
+      entry.recognizer = recognizer;
+
       const decoder = new OpusDecoder(this.sampleRate);
       decoder.on('data', (chunk) => {
         entry.chunks.push(chunk);
         entry.bytes += chunk.length;
+        recognizer.write(chunk);
       });
       decoder.on('error', (err) => console.error('Opus:', err.message));
       sub.on('error', (err) => console.error('Поток речи:', err.message));
@@ -100,11 +120,12 @@ export class VoiceListener {
     }
   }
 
-  endUser(userId) {
+  async endUser(userId) {
     const entry = this.users.get(userId);
     if (!entry) return;
     const pcm = Buffer.concat(entry.chunks);
     const startedAt = entry.startedAt;
+    const recognizer = entry.recognizer;
     try {
       entry.sub?.destroy();
     } catch {
@@ -115,22 +136,44 @@ export class VoiceListener {
     }
     this.users.delete(userId);
 
-    if (pcm.length < this.sampleRate * 2 * 0.3) return;
-    if (this.busy.has(userId)) return;
+    if (pcm.length < this.sampleRate * 2 * 0.3) {
+      recognizer?.abort();
+      return;
+    }
+    if (this.busy.has(userId)) {
+      recognizer?.abort();
+      return;
+    }
     this.busy.add(userId);
-    const recognition = recognizePcm(this.apiKey, pcm, {
-      language: this.language,
-      sampleRate: this.sampleRate,
-    });
-    recognition.then((value) => {
-      if (value) {
-        const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
-        console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${value}`);
-        this.onUtterance?.(value, userId, startedAt);
+
+    try {
+      let text = '';
+      if (recognizer) {
+        try {
+          text = await recognizer.end();
+        } catch (err) {
+          console.log('STT стрим не удался, фолбэк на FULL_DATA:', err.message);
+          text = await recognizePcm(this.apiKey, pcm, {
+            language: this.language,
+            sampleRate: this.sampleRate,
+          });
+        }
+      } else {
+        text = await recognizePcm(this.apiKey, pcm, {
+          language: this.language,
+          sampleRate: this.sampleRate,
+        });
       }
-    }).catch((err) => console.error('STT:', err.message)).finally(() => {
+      if (text) {
+        const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
+        console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${text}`);
+        this.onUtterance?.(text, userId, startedAt);
+      }
+    } catch (err) {
+      console.error('STT:', err.message);
+    } finally {
       this.busy.delete(userId);
-    });
+    }
   }
 
   closeUser(userId) {
@@ -144,6 +187,7 @@ export class VoiceListener {
       entry.dec?.destroy();
     } catch {
     }
+    entry.recognizer?.abort();
     this.users.delete(userId);
   }
 }

@@ -52,15 +52,15 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 - `src/index.js` — клиент Discord, регистрация слеш-команд, `handleUtterance`, сессии гильдий, автовход/автовыход, сообщение «сейчас играет» с кнопками (`buildNowPlayingContent`/`updateNowPlaying`/`handleNowPlayingButton`).
 - `src/config.js` — единственное место чтения env (кроме `dispatch.js`, где ключи GPT читаются для фиксера).
-- `src/voice/session.js` — плеер, очередь, скачивание mp3, TTS-ресурс, громкости.
+- `src/voice/session.js` — плеер, очередь, скачивание mp3, TTS-ресурс, громкости, звуковой сигнал (`playChime`).
 - `src/voice/connection.js` — join с `selfDeaf: false`, `debug: true` (debug можно убрать).
-- `src/listen/listener.js` — подписка на речь, opus→PCM, буфер фразы, вызов `recognizePcm`.
+- `src/listen/listener.js` — подписка на речь, opus→PCM, стриминг в STT (REAL_TIME), детект wake в `partial` (колбэк `onWake`), фолбэк на FULL_DATA.
 - `src/stt/session.js` — `recognizePcm(apiKey, pcm, {language, sampleRate})`: v3, при ошибке фолбэк на v1 HTTP.
-- `src/stt/v3.js` — `recognizePcmV3`, gRPC-стриминг SpeechKit v3 (LPCM → `final`/`partial` текст).
+- `src/stt/v3.js` — `recognizePcmV3` (FULL_DATA) и `createRecognizer` (REAL_TIME-стрим с `onPartial`), gRPC SpeechKit v3 (LPCM → `final`/`partial` текст).
 - `src/stt/proto/` — proto-файлы SpeechKit v3 (полный `stt.proto` из cloudapi + урезанный `stt_service.proto`).
 - `src/tts/synthesize.js` — `speakUma(session, text)`, проверяет наличие ключа.
 - `src/music/client.js` — `instantSearch` (instant/mixed, type=track), `instantPlaylists`, `playlistTracks`, `chart` (топ-чарт), `normalizeTrack`, `playableUrl`.
-- `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `isWaveIntent`, `stripWake`, `parseCommand`.
+- `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `isWaveIntent`, `stripWake`/`hasWakeWord` (fuzzy wake-матчинг), `parseCommand`.
 - `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), instant-поиск трека/плейлиста.
 - `src/commands/translit.js` — `translitFallbacks` (транслит-кандидаты для фикса кириллицы).
 - `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
@@ -71,7 +71,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 1. **Один AudioPlayer на VoiceConnection.** В `@discordjs/voice` 0.19 второй `connection.subscribe(player)` молча отписывает первый. Музыка и TTS — одна очередь (`kind: 'track' | 'tts'`) в `VoiceSession`. Не добавлять второй плеер.
 2. **Не стримить mp3 напрямую в плеер.** CDN Яндекса рвёт длинные соединения (`terminated` undici / `aborted` https). `downloadTrack()` качает файл целиком в память, затем играет; обязательно следовать 3xx (`get-mp3` отдаёт 308).
 3. **Громкость через `resource.volume.setVolume`** (в 0.19 нет `volumeTransformer`). Музыка `MUSIC_VOLUME_DEFAULT = 0.20`, TTS `TTS_VOLUME_DEFAULT = 2.6`.
-4. **STT — v3 gRPC-стриминг, фолбэк на v1 HTTP.** v3 — bidirectional gRPC `speechkit.stt.v3.Recognizer/RecognizeStreaming` на `stt.api.cloud.yandex.net:443`, авторизация через metadata `authorization: Api-Key <key>`, аудио raw LPCM 16-bit, `audioProcessingType: REAL_TIME` (не `FULL_DATA` — длинная фраза упрётся в дедлайн 15с). WebSocket-эндпоинты (хосты `transcribe.api.cloud.yandex.net`) отдают 403 — это v2 async REST, не использовать и не возвращать WS-код. При ошибке v3 `src/stt/session.js` падает на v1 `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`.
+4. **STT — v3 gRPC-стриминг, два режима; фолбэк на v1 HTTP.** v3 — bidirectional gRPC `speechkit.stt.v3.Recognizer/RecognizeStreaming` на `stt.api.cloud.yandex.net:443`, авторизация через metadata `authorization: Api-Key <key>`, аудио raw LPCM 16-bit 48k mono. Основной путь — `createRecognizer` (`src/stt/v3.js`) с `audioProcessingType: REAL_TIME`: PCM стримится по мере поступления, `partial` приходит во время речи (по нему `listener.js` детектит wake). Не сбрасывать весь буфер разом в REAL_TIME — это путает VAD/EOU модели и режет слова. После тишины шлётся `eou` → `final` → команда. При ошибке стрима — фолбэк `recognizePcmV3` (`audioProcessingType: FULL_DATA`, накопленный буфер целиком), затем v1. gRPC-дедлайн 60с (не 15с — короткий молча роняет v3 на v1). WebSocket-эндпоинты (хосты `transcribe.api.cloud.yandex.net`) отдают 403 — это v2 async REST, не использовать и не возвращать WS-код. Финальный фолбэк v1: `POST stt.api.cloud.yandex.net/speech/v1/stt:recognize?format=lpcm&...`.
 5. **Поиск — через `instant/mixed`, берём первый результат.** Треки: `/search/instant/mixed?type=track` → первый трек. Плейлисты: `type=playlist` → первый плейлист → треки `/users/{uid}/playlists/{kind}`. Ранжирование целиком на API, своего скоринга нет. Кириллический запрос с 0 треков → GPT-фикс + `translitFallbacks`, переспросить instant.
 6. **Ссылка на mp3 из `download-info` живёт ~1 минуту**; формула: `md5(SIGN_SALT + path.slice(1) + s)`, URL `https://{host}/get-mp3/{sign}/{ts}{path}`. Заголовок `X-Yandex-Music-Client` обязателен для download-info.
 7. **Wake-слова берутся из `.env`**, если переменная задана — она переопределяет дефолт в `config.js`. При смене wake-слова проверять `.env`, а не только код.
@@ -79,6 +79,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 9. `speakText` прерывает текущий трек и ставит его обратно в очередь после озвучки — сохранять это поведение при правках очереди.
 10. **Флаг `starting` в `VoiceSession` обязателен.** `start()` асинхронный (качает трек), а `player.state.status` остаётся `Idle` во время загрузки. Без `starting` `startNext()` при добавлении очереди запускает все треки разом (каждый выхватывает следующий из очереди), и 9 из 10 отбрасываются как «не Idle». `startNext()` не должен запускать новый трек, пока `start()` не завершился.
 11. **Озвучка названия трека.** Когда музыка уже играет (`session.current.kind === 'track'`), добавление трека/плейлиста в очередь объявляется голосом сразу — через `speakUma`, который прерывает текущий трек и продолжает его после озвучки. Когда ничего не играет — через поле `announce`: в `start()` при его наличии и заданном `this.tts.apiKey` перед треком в очередь вставляется TTS с этим текстом, само поле удаляется (чтобы не зациклиться).
+12. **Отклик на wake-слово — звуковой сигнал во время речи.** `listener.js` детектит wake в `partial` через fuzzy-матчинг `hasWakeWord`/`isWakeToken` (`parse.js`: точное совпадение + варианты-ослышки `WAKE_VARIANTS` + расстояние Левенштейна ≤1) и вызывает `onWake` → `session.playChime()` (короткий двухтональный сигнал, raw-PCM, кэш в `getChimeBuffer`). Словами «Слушаю» не отвечать — отклик должен прийти до конца фразы. Ослышки менять в `WAKE_VARIANTS`, тон/длительность — в `getChimeBuffer`.
 
 ## Особенности поиска (dispatch.js)
 

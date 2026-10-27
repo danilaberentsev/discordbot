@@ -9,6 +9,7 @@ import { get as httpsGet } from 'node:https';
 
 const MUSIC_VOLUME_DEFAULT = 0.20;
 const TTS_VOLUME_DEFAULT = 2.6;
+const CHIME_VOLUME = 1.0;
 
 function clampVolume(value) {
   return Math.min(1, Math.max(0.05, value));
@@ -122,6 +123,36 @@ async function ttsResource(text, apiKey, voice) {
   return resource;
 }
 
+// короткий двухтональный «динь» (stereo 16-bit LE, 48k) для отклика на wake-слово
+let chimeBuffer = null;
+function getChimeBuffer() {
+  if (chimeBuffer) return chimeBuffer;
+  const sampleRate = 48000;
+  const tones = [
+    { freq: 880, start: 0, dur: 0.14 },
+    { freq: 1318.51, start: 0.13, dur: 0.16 },
+  ];
+  const n = Math.floor(sampleRate * 0.3);
+  const buf = Buffer.alloc(n * 4);
+  for (let i = 0; i < n; i++) {
+    const t = i / sampleRate;
+    let s = 0;
+    for (const { freq, start, dur } of tones) {
+      if (t >= start && t < start + dur) {
+        const x = t - start;
+        const env = Math.min(1, x / 0.005, (dur - x) / 0.04);
+        s += Math.sin(2 * Math.PI * freq * x) * env;
+      }
+    }
+    const v = Math.max(-1, Math.min(1, s * 0.5));
+    const s16 = Math.round(v * 32767);
+    buf.writeInt16LE(s16, i * 4);
+    buf.writeInt16LE(s16, i * 4 + 2);
+  }
+  chimeBuffer = buf;
+  return buf;
+}
+
 export class VoiceSession {
   constructor(connection, tts = {}) {
     this.connection = connection;
@@ -182,7 +213,9 @@ export class VoiceSession {
     try {
       const resource = item.kind === 'tts'
         ? await ttsResource(item.text, item.apiKey, item.voice)
-        : await trackResource(item, this.musicVolume);
+        : item.kind === 'chime'
+          ? item.resource
+          : await trackResource(item, this.musicVolume);
       if (token !== this.startToken || this.player.state.status !== AudioPlayerStatus.Idle) {
         try {
           resource.playStream.destroy();
@@ -223,6 +256,25 @@ export class VoiceSession {
 
   async speakText(text, { apiKey, voice, onEnd } = {}) {
     const item = { kind: 'tts', text, apiKey, voice, onEnd };
+    const status = this.player.state.status;
+    if (status === AudioPlayerStatus.Idle) {
+      if (this.starting) this.startToken++;
+      this.queue.unshift(item);
+      this.startNext();
+      return;
+    }
+    const resume = this.current && this.current.kind === 'track' ? this.current : null;
+    this.queue = [item, ...(resume ? [resume] : []), ...this.queue];
+    this.player.stop(true);
+  }
+
+  playChime() {
+    const resource = createAudioResource(Readable.from(getChimeBuffer()), {
+      inputType: StreamType.Raw,
+      inlineVolume: true,
+    });
+    resource.volume?.setVolume(CHIME_VOLUME);
+    const item = { kind: 'chime', resource };
     const status = this.player.state.status;
     if (status === AudioPlayerStatus.Idle) {
       if (this.starting) this.startToken++;

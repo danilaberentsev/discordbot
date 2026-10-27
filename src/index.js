@@ -87,6 +87,10 @@ function getSession(guild, channel, textChannelId) {
     onUtterance: (text, userId, startedAt) => {
       handleUtterance(guild.id, text, userId, startedAt).catch((err) => console.error(err));
     },
+    onWake: () => {
+      const record = sessions.get(guild.id);
+      if (record) record.session.playChime();
+    },
   });
   listener.start();
   const music = config.yandexMusicToken ? new YandexMusicClient(config.yandexMusicToken) : null;
@@ -267,7 +271,6 @@ async function handleUtterance(guildId, text, userId, startedAt) {
       await runCommand(record, rest, userId);
     } else {
       record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
-      await speakUma(record.session, 'Слушаю');
     }
     return;
   }

@@ -157,11 +157,6 @@ export class VoiceSession {
         console.log(`[voice] ${oldState.status} -> ${newState.status}`);
       }
     });
-    // this.probe = setInterval(() => {
-    //   console.log(
-    //     `[probe] conn=${this.connection.state.status} subs=${this.player.subscribers.length} player=${this.player.state.status}`,
-    //   );
-    // }, 1000);
   }
 
   startNext() {
@@ -271,7 +266,6 @@ export class VoiceSession {
   }
 
   destroy() {
-    clearInterval(this.probe);
     try {
       this.player.stop(true);
     } catch {

@@ -3,8 +3,6 @@ import { Transform } from 'node:stream';
 import OpusScript from 'opusscript';
 import { recognizePcm } from '../stt/session.js';
 
-const MAX_UTTERANCE_BYTES = 48000 * 2 * 55;
-
 class OpusDecoder extends Transform {
   constructor(rate) {
     super();

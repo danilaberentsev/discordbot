@@ -69,7 +69,6 @@ export class YandexMusicClient {
   normalizeTrack(track) {
     return {
       id: track.id,
-      albumId: track.albums?.[0]?.id ?? null,
       title: track.title ?? 'Без названия',
       artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(', '),
       durationMs: track.durationMs ?? 0,

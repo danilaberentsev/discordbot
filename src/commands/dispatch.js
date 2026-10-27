@@ -86,24 +86,24 @@ async function playWave(session, music) {
   return 'Включаю: популярные треки';
 }
 
-async function startPicked(session, music, candidate) {
-  const label = candidate.picked.artists ? `${candidate.picked.artists} — ${candidate.picked.title}` : candidate.picked.title;
-  const announce = candidate.picked.artists
-    ? `Включаю: ${candidate.picked.artists}, ${candidate.picked.title}`
-    : `Включаю: ${candidate.picked.title}`;
+async function startPicked(session, music, picked) {
+  const label = picked.artists ? `${picked.artists} — ${picked.title}` : picked.title;
+  const announce = picked.artists
+    ? `Включаю: ${picked.artists}, ${picked.title}`
+    : `Включаю: ${picked.title}`;
   if (session.waveRefill) {
     session.playNext({
-      id: candidate.picked.id,
-      title: candidate.picked.title,
-      artists: candidate.picked.artists,
+      id: picked.id,
+      title: picked.title,
+      artists: picked.artists,
       announce,
-      url: () => music.playableUrl(candidate.picked.id),
+      url: () => music.playableUrl(picked.id),
     });
   } else {
-    const url = await music.playableUrl(candidate.picked.id);
-    await session.playTrack({ id: candidate.picked.id, title: candidate.picked.title, artists: candidate.picked.artists, announce, url });
+    const url = await music.playableUrl(picked.id);
+    await session.playTrack({ id: picked.id, title: picked.title, artists: picked.artists, announce, url });
   }
-  console.log(`Выбран трек: ${label} (id ${candidate.picked.id})`);
+  console.log(`Выбран трек: ${label} (id ${picked.id})`);
   return `Включаю: ${label}`;
 }
 
@@ -115,7 +115,7 @@ async function playInstant(session, music, query, fixer) {
   }
   const picked = tracks[0];
   if (!picked) return `Ничего не нашла по запросу ${query}`;
-  return startPicked(session, music, { query, picked, score: 0 });
+  return startPicked(session, music, picked);
 }
 
 async function instantSearchFixed(music, query, fixer) {

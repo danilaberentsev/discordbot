@@ -118,11 +118,11 @@ export class VoiceListener {
     if (pcm.length < this.sampleRate * 2 * 0.3) return;
     if (this.busy.has(userId)) return;
     this.busy.add(userId);
-    const text = recognizePcm(this.apiKey, pcm, {
+    const recognition = recognizePcm(this.apiKey, pcm, {
       language: this.language,
       sampleRate: this.sampleRate,
     });
-    text.then((value) => {
+    recognition.then((value) => {
       if (value) {
         const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
         console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${value}`);

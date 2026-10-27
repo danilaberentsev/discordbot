@@ -222,6 +222,7 @@ async function handleNowPlayingButton(interaction) {
       record.session.changeVolume(-0.15);
       break;
     default:
+      await interaction.deferUpdate().catch(() => {});
       return;
   }
   await interaction.update(buildNowPlayingContent(record)).catch(() => {});

@@ -67,10 +67,15 @@ async function enqueueChart(session, music) {
 
 async function playWave(session, music) {
   const refill = async () => {
+    let count = 0;
     try {
-      await enqueueChart(session, music);
+      count = await enqueueChart(session, music);
     } catch (err) {
       console.error('Волна: не удалось догрузить чарт:', err.message);
+    }
+    if (!count) {
+      session.setWaveRefill(null);
+      session.onIdle?.();
     }
   };
   let count;
@@ -91,18 +96,15 @@ async function startPicked(session, music, picked) {
   const announce = picked.artists
     ? `Включаю: ${picked.artists}, ${picked.title}`
     : `Включаю: ${picked.title}`;
-  if (session.waveRefill) {
-    session.playNext({
-      id: picked.id,
-      title: picked.title,
-      artists: picked.artists,
-      announce,
-      url: () => music.playableUrl(picked.id),
-    });
-  } else {
-    const url = await music.playableUrl(picked.id);
-    await session.playTrack({ id: picked.id, title: picked.title, artists: picked.artists, announce, url });
-  }
+  const item = {
+    id: picked.id,
+    title: picked.title,
+    artists: picked.artists,
+    announce,
+    url: () => music.playableUrl(picked.id),
+  };
+  if (session.waveRefill) session.playNext(item);
+  else await session.playTrack(item);
   console.log(`Выбран трек: ${label} (id ${picked.id})`);
   return `Включаю: ${label}`;
 }

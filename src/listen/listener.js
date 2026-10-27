@@ -3,7 +3,7 @@ import { Transform } from 'node:stream';
 import OpusScript from 'opusscript';
 import { recognizePcm } from '../stt/session.js';
 import { createRecognizer } from '../stt/v3.js';
-import { hasWakeWord } from '../commands/parse.js';
+import { findWakeToken } from '../commands/parse.js';
 
 class OpusDecoder extends Transform {
   constructor(rate) {
@@ -95,10 +95,13 @@ export class VoiceListener {
         language: this.language,
         sampleRate: this.sampleRate,
         onPartial: (text) => {
-          if (!entry.wakeFired && hasWakeWord(text)) {
-            entry.wakeFired = true;
-            this.onWake?.(userId);
-          }
+          if (entry.wakeFired) return;
+          const wake = findWakeToken(text);
+          if (!wake) return;
+          entry.wakeFired = true;
+          const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
+          console.log(`[${time}] Wake (${this.resolveName(userId)}): «${wake}»`);
+          this.onWake?.(userId);
         },
       });
       entry.recognizer = recognizer;

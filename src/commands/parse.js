@@ -102,58 +102,38 @@ const ALIASES = new Map(
   SPACEGLIDE_VARIANTS.map((variant) => [compact(variant), SPACEGLIDE_QUERY]),
 );
 
-// ослышки wake-слова «аделина»: редукция безударных гласных + редкое имя → частотное слово/имя.
-// Чем шире список — тем меньше «не услышала», но тем больше ложных срабатываний на обычной речи.
+// ослышки wake-слова «аделина»: только прямые фонетические искажения.
+// Частотные имена/слова с хвостом «-лина» (галина, полина, малина…) дают ложные срабатывания — не добавлять.
 const WAKE_VARIANTS = new Set([
   // редукция гласных / обрезка безударного начала (а-де-ли-на ≈ да-ли-на)
-  'долина', 'алина', 'лина', 'делина', 'елина', 'оделина', 'иделина',
-  // частотные имена/слова с тем же хвостом «-лина»/«-елина»
-  'галина', 'полина', 'малина', 'калина', 'ангелина',
+  'долина', 'алина', 'лина', 'делина', 'елина', 'оделина',
   // орфография и замены согласных
   'адэлина', 'адерина',
 ]);
 
-function levenshtein(a, b) {
-  const m = a.length;
-  const n = b.length;
-  if (!m) return n;
-  if (!n) return m;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-  }
-  return dp[m][n];
-}
-
 export function isWakeToken(token) {
   if (config.wakeWords.includes(token)) return true;
   if (WAKE_VARIANTS.has(token)) return true;
-  for (const w of config.wakeWords) {
-    if (Math.abs(token.length - w.length) <= 1 && levenshtein(token, w) <= 1) return true;
-  }
   return false;
 }
 
+export function findWakeToken(text) {
+  return normalize(text).split(' ').find(isWakeToken) ?? null;
+}
+
 export function hasWakeWord(text) {
-  return normalize(text).split(' ').some(isWakeToken);
+  return findWakeToken(text) !== null;
 }
 
 export function stripWake(text) {
   const norm = normalize(text);
   const tokens = norm.split(' ');
-  if (!tokens.some(isWakeToken)) {
-    return { matched: false, rest: norm };
+  const wakeToken = tokens.find(isWakeToken);
+  if (!wakeToken) {
+    return { matched: false, rest: norm, wakeToken: null };
   }
   const rest = tokens.filter((token) => !isWakeToken(token)).join(' ').trim();
-  return { matched: true, rest };
+  return { matched: true, rest, wakeToken };
 }
 
 export function parseCommand(text) {

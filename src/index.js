@@ -263,10 +263,10 @@ function hasStopWord(text) {
 async function handleUtterance(guildId, text, userId, startedAt) {
   const record = sessions.get(guildId);
   if (!record) return;
-  const { matched, rest } = stripWake(text);
+  const { matched, rest, wakeToken } = stripWake(text);
 
   if (matched) {
-    console.log(`Голос -> команда: "${rest}" (было: "${text}")`);
+    console.log(`Голос -> команда: "${rest}" (wake: «${wakeToken}», было: "${text}")`);
     if (rest) {
       await runCommand(record, rest, userId);
     } else {

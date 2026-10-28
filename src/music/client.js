@@ -66,6 +66,13 @@ export class YandexMusicClient {
     return tracks.slice(0, limit).map((entry) => this.normalizeTrack(entry.track));
   }
 
+  async myWaveTracks() {
+    const data = await this.request('/rotor/station/user:onyourwave/tracks');
+    return (data?.result?.sequence ?? [])
+      .filter((s) => s.type === 'track' && s.track)
+      .map((s) => this.normalizeTrack(s.track));
+  }
+
   normalizeTrack(track) {
     return {
       id: track.id,

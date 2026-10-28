@@ -1,6 +1,6 @@
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
-import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord } from './parse.js';
+import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord, isMyWaveIntent } from './parse.js';
 import { config } from '../config.js';
 import { speakUma } from '../tts/synthesize.js';
 
@@ -46,7 +46,8 @@ export async function runMusicCommand(session, music, cmd) {
 
 export async function playMusic(session, music, query, fixer = defaultFixer) {
   if (!music) throw new Error('YANDEX_MUSIC_TOKEN не настроен');
-  const wave = !query || query === '__wave__' || query.includes('моя волна') || isWaveIntent(cleanQuery(query));
+  if (query === '__mywave__' || isMyWaveIntent(query)) return playMyWave(session, music);
+  const wave = !query || query === '__wave__' || isWaveIntent(cleanQuery(query));
   if (wave) return playWave(session, music);
 
   const actualQuery = cleanQuery(query);
@@ -96,6 +97,51 @@ async function playWave(session, music) {
   session.setWaveRefill(refill);
   console.log(`Волна: ${count} треков в очереди`);
   return 'Включаю: популярные треки';
+}
+
+const MY_WAVE_BATCHES = 4;
+
+// «Моя волна» — персональная радиостанция: дёргаем несколько раз, фильтруем повторы по id
+async function enqueueMyWave(session, music, played) {
+  let added = 0;
+  for (let i = 0; i < MY_WAVE_BATCHES; i++) {
+    const tracks = await music.myWaveTracks();
+    const fresh = tracks.filter((t) => !played.has(t.id));
+    if (!fresh.length) break;
+    for (const t of fresh) {
+      played.add(t.id);
+      session.playTrack(trackItem(t, music));
+      added++;
+    }
+  }
+  return added;
+}
+
+async function playMyWave(session, music) {
+  const played = new Set();
+  const refill = async () => {
+    let count = 0;
+    try {
+      count = await enqueueMyWave(session, music, played);
+    } catch (err) {
+      console.error('Моя волна: не удалось догрузить:', err.message);
+    }
+    if (!count) {
+      session.setWaveRefill(null);
+      session.onIdle?.();
+    }
+  };
+  let count;
+  try {
+    count = await enqueueMyWave(session, music, played);
+  } catch (err) {
+    console.error('Моя волна:', err.message);
+    return `Не получилось: ${err.message}`;
+  }
+  if (!count) return 'Не смогла включить мою волну';
+  session.setWaveRefill(refill);
+  console.log(`Моя волна: ${count} треков в очереди`);
+  return 'Включаю мою волну';
 }
 
 async function startPicked(session, music, picked) {

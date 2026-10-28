@@ -43,6 +43,13 @@ export function cleanQuery(text) {
   return tokens.join(' ').trim();
 }
 
+// «моя волна» — персональная радиостанция (отличается от топ-чарта «волны»)
+const MY_WAVE_PHRASES = new Set(['моя волна', 'мою волну', 'моей волны']);
+
+export function isMyWaveIntent(text) {
+  return MY_WAVE_PHRASES.has(normalize(text));
+}
+
 const PLAYLIST_WORDS = new Set(['плейлист', 'плейлисты', 'плейлиста', 'сборник', 'сборники', 'сборника']);
 
 export function isPlaylistIntent(q) {
@@ -165,13 +172,15 @@ export function parseCommand(text) {
   if (/^(громче|погромче)$/.test(t)) return { action: 'volume', delta: 0.15 };
   const volLevel = parseVolumeLevel(t);
   if (volLevel !== null) return { action: 'volume', level: volLevel };
-  if (t === 'моя волна' || t === 'радио' || isWaveIntent(t)) {
+  if (isMyWaveIntent(t)) return { action: 'play', query: '__mywave__' };
+  if (t === 'радио' || isWaveIntent(t)) {
     return { action: 'play', query: '__wave__' };
   }
   const play = t.match(/^(?:хочу\s+)?(?:послушать|слушать|послушай|включить|включи|запустить|запусти|поставь|поставить|играй|сыграй)\s+(.+)$/);
   if (play) {
     const q = cleanQuery(play[1]);
     if (isSkipIntent(q)) return { action: 'skip' };
+    if (isMyWaveIntent(q)) return { action: 'play', query: '__mywave__' };
     if (isWaveIntent(q)) return { action: 'play', query: '__wave__' };
     return { action: 'play', query: q };
   }

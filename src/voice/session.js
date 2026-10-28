@@ -259,8 +259,7 @@ export class VoiceSession {
     this.waveRefill = fn;
   }
 
-  async speakText(text, { apiKey, voice, onEnd } = {}) {
-    const item = { kind: 'tts', text, apiKey, voice, onEnd };
+  playInterrupting(item) {
     const status = this.player.state.status;
     if (status === AudioPlayerStatus.Idle) {
       if (this.starting) this.startToken++;
@@ -273,23 +272,17 @@ export class VoiceSession {
     this.player.stop(true);
   }
 
+  speakText(text, { apiKey, voice, onEnd } = {}) {
+    this.playInterrupting({ kind: 'tts', text, apiKey, voice, onEnd });
+  }
+
   playChime() {
     const resource = createAudioResource(Readable.from(getChimeBuffer()), {
       inputType: StreamType.Raw,
       inlineVolume: true,
     });
     resource.volume?.setVolume(CHIME_VOLUME);
-    const item = { kind: 'chime', resource };
-    const status = this.player.state.status;
-    if (status === AudioPlayerStatus.Idle) {
-      if (this.starting) this.startToken++;
-      this.queue.unshift(item);
-      this.startNext();
-      return;
-    }
-    const resume = this.current && this.current.kind === 'track' ? this.current : null;
-    this.queue = [item, ...(resume ? [resume] : []), ...this.queue];
-    this.player.stop(true);
+    this.playInterrupting({ kind: 'chime', resource });
   }
 
   skip() {

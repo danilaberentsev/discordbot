@@ -129,44 +129,17 @@ export class VoiceListener {
     const pcm = Buffer.concat(entry.chunks);
     const startedAt = entry.startedAt;
     const recognizer = entry.recognizer;
-    try {
-      entry.sub?.destroy();
-    } catch {
-    }
-    try {
-      entry.dec?.destroy();
-    } catch {
-    }
+    this.destroyEntry(entry);
     this.users.delete(userId);
 
-    if (pcm.length < this.sampleRate * 2 * 0.3) {
-      recognizer?.abort();
-      return;
-    }
-    if (this.busy.has(userId)) {
+    if (pcm.length < this.sampleRate * 2 * 0.3 || this.busy.has(userId)) {
       recognizer?.abort();
       return;
     }
     this.busy.add(userId);
 
     try {
-      let text = '';
-      if (recognizer) {
-        try {
-          text = await recognizer.end();
-        } catch (err) {
-          console.log('STT стрим не удался, фолбэк на FULL_DATA:', err.message);
-          text = await recognizePcm(this.apiKey, pcm, {
-            language: this.language,
-            sampleRate: this.sampleRate,
-          });
-        }
-      } else {
-        text = await recognizePcm(this.apiKey, pcm, {
-          language: this.language,
-          sampleRate: this.sampleRate,
-        });
-      }
+      const text = await this.finalizeText(recognizer, pcm);
       if (text) {
         const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
         console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${text}`);
@@ -179,9 +152,33 @@ export class VoiceListener {
     }
   }
 
+  async finalizeText(recognizer, pcm) {
+    if (!recognizer) {
+      return recognizePcm(this.apiKey, pcm, {
+        language: this.language,
+        sampleRate: this.sampleRate,
+      });
+    }
+    try {
+      return await recognizer.end();
+    } catch (err) {
+      console.log('STT стрим не удался, фолбэк на FULL_DATA:', err.message);
+      return recognizePcm(this.apiKey, pcm, {
+        language: this.language,
+        sampleRate: this.sampleRate,
+      });
+    }
+  }
+
   closeUser(userId) {
     const entry = this.users.get(userId);
     if (!entry) return;
+    this.destroyEntry(entry);
+    entry.recognizer?.abort();
+    this.users.delete(userId);
+  }
+
+  destroyEntry(entry) {
     try {
       entry.sub?.destroy();
     } catch {
@@ -190,7 +187,5 @@ export class VoiceListener {
       entry.dec?.destroy();
     } catch {
     }
-    entry.recognizer?.abort();
-    this.users.delete(userId);
   }
 }

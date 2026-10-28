@@ -6,6 +6,10 @@ import { speakUma } from '../tts/synthesize.js';
 
 const WAVE_CHART_LIMIT = 100;
 
+function trackItem(track, music) {
+  return { id: track.id, title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) };
+}
+
 function defaultFixer(query) {
   if (config.cloudApiKey && config.yandexGptFolderId) {
     return fixUtterance(query, {
@@ -61,7 +65,7 @@ async function enqueueChart(session, music) {
   const chart = await music.chart(WAVE_CHART_LIMIT);
   if (!chart.length) return 0;
   for (const track of shuffle(chart)) {
-    session.playTrack({ id: track.id, title: track.title, artists: track.artists, url: () => music.playableUrl(track.id) });
+    session.playTrack(trackItem(track, music));
   }
   return chart.length;
 }
@@ -97,12 +101,7 @@ async function startPicked(session, music, picked) {
   const announce = picked.artists
     ? `Включаю: ${picked.artists}, ${picked.title}`
     : `Включаю: ${picked.title}`;
-  const item = {
-    id: picked.id,
-    title: picked.title,
-    artists: picked.artists,
-    url: () => music.playableUrl(picked.id),
-  };
+  const item = trackItem(picked, music);
   if (session.current?.kind === 'track') {
     // музыка играет — кладём в очередь и объявляем сразу
     if (session.waveRefill) session.playNext(item);
@@ -160,7 +159,7 @@ async function playInstantPlaylist(session, music, query) {
   const playing = session.current?.kind === 'track';
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
-    const item = { id: t.id, title: t.title, artists: t.artists, url: () => music.playableUrl(t.id) };
+    const item = trackItem(t, music);
     if (i === 0 && !playing) item.announce = announce;
     session.playTrack(item);
   }

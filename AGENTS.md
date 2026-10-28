@@ -63,7 +63,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/commands/parse.js` — `normalize`, `cleanQuery` (стоп-слова), `isWaveIntent`, `stripWake`/`hasWakeWord` (fuzzy wake-матчинг), `parseCommand`.
 - `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), instant-поиск трека/плейлиста.
 - `src/commands/translit.js` — `translitFallbacks` (транслит-кандидаты для фикса кириллицы).
-- `src/assistant/llm.js` — `askYandexGpt` (модель по умолчанию `yandexgpt`), `fixUtterance`.
+- `src/assistant/llm.js` — `askDeepSeek` (OpenAI-совместимый API DeepSeek, модель по умолчанию `deepseek-chat`), `fixUtterance`.
 - `src/assistant/context.js` — история диалога, системный промпт «Аделина».
 
 ## Инварианты, которые нельзя ломать

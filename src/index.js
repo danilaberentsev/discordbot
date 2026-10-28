@@ -28,8 +28,8 @@ const client = new Client({
 });
 
 const sessions = new Map();
-const assistant = config.cloudApiKey && config.yandexGptFolderId
-  ? new Assistant({ apiKey: config.cloudApiKey, folderId: config.yandexGptFolderId })
+const assistant = config.deepseekApiKey
+  ? new Assistant({ apiKey: config.deepseekApiKey })
   : null;
 const LISTEN_WINDOW_MS = 8000;
 const FOLLOWUP_WINDOW_MS = 3000;
@@ -306,7 +306,7 @@ async function runCommand(record, text, userId) {
 
   if (cmd.action === 'assistant') {
     if (!assistant) {
-      console.log('Ассистент не настроен, нужен YANDEX_CLOUD_API_KEY и YANDEXGPT_FOLDER_ID');
+      console.log('Ассистент не настроен, нужен DEEPSEEK_API_KEY');
       await speakUma(record.session, 'Ассистент пока не настроен');
       return true;
     }

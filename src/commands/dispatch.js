@@ -11,11 +11,8 @@ function trackItem(track, music) {
 }
 
 function defaultFixer(query) {
-  if (config.cloudApiKey && config.yandexGptFolderId) {
-    return fixUtterance(query, {
-      apiKey: config.cloudApiKey,
-      folderId: config.yandexGptFolderId,
-    });
+  if (config.deepseekApiKey) {
+    return fixUtterance(query, { apiKey: config.deepseekApiKey });
   }
   return query;
 }

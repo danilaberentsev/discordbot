@@ -43,7 +43,7 @@ npm start
 | `DISCORD_TOKEN` | да | Токен бота из Discord Developer Portal |
 | `GUILD_ID` | нет | ID сервера для мгновенной регистрации слеш-команд; без него команды глобальные (до ~1 часа) |
 | `YANDEX_CLOUD_API_KEY` | для STT/TTS | API-ключ сервисного аккаунта Yandex Cloud |
-| `YANDEXGPT_FOLDER_ID` | для GPT | ID каталога Yandex Cloud |
+| `DEEPSEEK_API_KEY` | для ассистента | API-ключ DeepSeek (`https://platform.deepseek.com`) |
 | `YANDEX_MUSIC_TOKEN` | для музыки | OAuth-токен Яндекс Музыки |
 | `STT_LANGUAGE` | нет | Язык распознавания, по умолчанию `ru-RU` |
 | `TTS_VOICE` | нет | Голос синтеза, по умолчанию `alena` |
@@ -56,9 +56,9 @@ npm start
 2. Создать сервисный аккаунт и выдать ему роли:
    - `ai.speechkit-stt` — распознавание речи
    - `ai.speechkit-tts` — синтез речи
-   - `ai.languageModels.user` — YandexGPT
 3. Создать для сервисного аккаунта API-ключ (`AQVN...`) — это `YANDEX_CLOUD_API_KEY`.
-4. ID каталога — `YANDEXGPT_FOLDER_ID`.
+
+Ответы ассистента и фикс поискового запроса идут через DeepSeek (`DEEPSEEK_API_KEY`), не через YandexGPT.
 
 ### Yandex Music токен
 

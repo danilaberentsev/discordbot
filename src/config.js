@@ -4,7 +4,7 @@ export const config = {
   discordToken: process.env.DISCORD_TOKEN ?? '',
   guildId: process.env.GUILD_ID ?? '',
   cloudApiKey: process.env.YANDEX_CLOUD_API_KEY ?? '',
-  yandexGptFolderId: process.env.YANDEXGPT_FOLDER_ID ?? '',
+  deepseekApiKey: process.env.DEEPSEEK_API_KEY ?? '',
   yandexMusicToken: process.env.YANDEX_MUSIC_TOKEN ?? '',
   sttLanguage: process.env.STT_LANGUAGE ?? 'ru-RU',
   sttSampleRate: 48000,

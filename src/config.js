@@ -9,7 +9,6 @@ export const config = {
   sttLanguage: process.env.STT_LANGUAGE ?? 'ru-RU',
   sttSampleRate: 48000,
   ttsVoice: process.env.TTS_VOICE ?? 'alena',
-  autojoinUserId: process.env.AUTOJOIN_USER_ID ?? '',
   followupEnabled: process.env.FOLLOWUP_ENABLED === 'true',
   wakeWords: (process.env.WAKE_WORDS ?? 'аделина,adelina,аделинка,аделя,адель')
     .split(',')

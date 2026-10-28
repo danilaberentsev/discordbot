@@ -136,15 +136,28 @@ export function stripWake(text) {
   return { matched: true, rest, wakeToken };
 }
 
+const SKIP_WORDS = new Set(['дальше', 'следующий', 'следующая', 'следующую', 'next', 'другой', 'другую', 'скип']);
+const SKIP_NOUNS = new Set(['трек', 'треки', 'трэк', 'песню', 'песня', 'песни', 'композицию', 'композиция']);
+const STOP_NOUNS = new Set(['музыку', 'музыка', 'песню', 'песни', 'трек', 'треки', 'звук']);
+
+function isSkipIntent(t) {
+  const [first, ...rest] = t.split(' ');
+  return SKIP_WORDS.has(first) && rest.every((tok) => SKIP_NOUNS.has(tok));
+}
+
+function isStopIntent(t) {
+  const [first, ...rest] = t.split(' ');
+  return (first === 'стоп' || first === 'хватит' || first === 'все')
+    && rest.every((tok) => STOP_NOUNS.has(tok));
+}
+
 export function parseCommand(text) {
   const t = normalize(text);
   if (!t) return null;
   const alias = ALIASES.get(compact(t));
   if (alias) return { action: 'play', query: alias };
-  if (/^(стоп|хватит|все)$/.test(t)) return { action: 'stop' };
-  if (/^(дальше|следующий|следующую|next|другой|другую|скип)$/.test(t)) {
-    return { action: 'skip' };
-  }
+  if (isStopIntent(t)) return { action: 'stop' };
+  if (isSkipIntent(t)) return { action: 'skip' };
   if (/^(выйди|уйди|выходи|уходи|отключись|пока)(\s|$)/.test(t)) {
     return { action: 'leave' };
   }
@@ -158,6 +171,7 @@ export function parseCommand(text) {
   const play = t.match(/^(?:хочу\s+)?(?:послушать|слушать|послушай|включить|включи|запустить|запусти|поставь|поставить|играй|сыграй)\s+(.+)$/);
   if (play) {
     const q = cleanQuery(play[1]);
+    if (isSkipIntent(q)) return { action: 'skip' };
     if (isWaveIntent(q)) return { action: 'play', query: '__wave__' };
     return { action: 'play', query: q };
   }

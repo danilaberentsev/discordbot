@@ -134,6 +134,13 @@ function destroySession(guildId) {
   record.nowPlayingMessage?.delete().catch(() => {});
 }
 
+// переход в другой канал без разрыва музыки: соединение переиспользуется (rejoin),
+// плеер, очередь и слушатель остаются на месте
+function moveSession(record, channel) {
+  record.connection.rejoin({ channelId: channel.id, selfDeaf: false, selfMute: false });
+  console.log(`Перехожу в «${channel.name}»`);
+}
+
 function buildNowPlayingContent(record) {
   const { session } = record;
   const current = session.current;
@@ -406,16 +413,17 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
   if (!guildId) return;
   if (newState.member?.user?.bot) return;
 
+  const guild = newState.guild ?? oldState.guild;
   const record = sessions.get(guildId);
 
-  // авто-вход: разрешённый пользователь зашёл в канал, а бот ещё нигде не подключён
-  if (!record && newState.channelId) {
-    if (config.autojoinUserId && newState.member.id !== config.autojoinUserId) return;
-    const channel = newState.guild.channels.cache.get(newState.channelId);
-    if (channel) getSession(newState.guild, channel, null);
+  // бот нигде не подключён — идём за любым пользователем, зашедшим в канал
+  if (!record) {
+    if (newState.channelId) {
+      const channel = guild.channels.cache.get(newState.channelId);
+      if (channel) getSession(guild, channel, null);
+    }
     return;
   }
-  if (!record) return;
 
   const botChannelId = record.connection.joinConfig.channelId;
 
@@ -426,20 +434,33 @@ client.on(Events.VoiceStateUpdate, (oldState, newState) => {
     return;
   }
 
-  // пользователь ушёл из канала бота — озвучить и проверить автовыход
+  // пользователь ушёл из канала бота — озвучить и проверить, остался ли кто-то
   if (oldState.channelId === botChannelId && newState.channelId !== botChannelId) {
     const name = oldState.member?.displayName ?? 'кто-то';
-    const channel = oldState.guild.channels.cache.get(botChannelId);
+    const channel = guild.channels.cache.get(botChannelId);
     const humans = channel?.members?.filter((member) => !member.user.bot).size ?? 0;
     if (humans > 0) speakUma(record.session, `${name} нас покинул`);
 
     setTimeout(() => {
-      const ch = oldState.guild.channels.cache.get(botChannelId);
+      const current = sessions.get(guildId);
+      if (!current || current.connection.joinConfig.channelId !== botChannelId) return;
+      const ch = guild.channels.cache.get(botChannelId);
       const remaining = ch?.members?.filter((member) => !member.user.bot).size ?? 0;
-      if (remaining === 0) destroySession(guildId);
+      if (remaining > 0) return;
+      const target = findPopulatedVoiceChannel(guild, botChannelId);
+      if (target) moveSession(current, target);
+      else destroySession(guildId);
     }, 2000);
   }
 });
+
+function findPopulatedVoiceChannel(guild, excludeChannelId) {
+  return guild.channels.cache.find((channel) =>
+    channel.type === ChannelType.GuildVoice
+    && channel.id !== excludeChannelId
+    && channel.members?.some((member) => !member.user.bot)
+  ) ?? null;
+}
 
 if (!config.discordToken) {
   console.error('Нет DISCORD_TOKEN в .env');

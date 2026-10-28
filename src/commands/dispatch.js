@@ -28,7 +28,9 @@ export async function runMusicCommand(session, music, cmd) {
     case 'skip':
       if (!session.current) return 'Сейчас ничего не играет';
       session.skip();
-      return 'Переключаю трек';
+      // без голосового объявления: озвучка прерывает уже начавшуюся загрузку
+      // следующего трека и скипает его (теряется один трек из очереди)
+      return null;
     case 'volume': {
       const volume = cmd.level !== undefined
         ? session.setVolume(cmd.level)
@@ -98,17 +100,20 @@ async function playWave(session, music) {
 
 async function startPicked(session, music, picked) {
   const label = picked.artists ? `${picked.artists} — ${picked.title}` : picked.title;
-  const announce = picked.artists
-    ? `Включаю: ${picked.artists}, ${picked.title}`
-    : `Включаю: ${picked.title}`;
   const item = trackItem(picked, music);
   if (session.current?.kind === 'track') {
-    // музыка играет — кладём в очередь и объявляем сразу
+    // музыка уже играет — добавляем в очередь и объявляем сразу (с прерыванием)
+    const announce = picked.artists
+      ? `Добавляю ${picked.artists}, ${picked.title} следующим`
+      : `Добавляю ${picked.title} следующим`;
     if (session.waveRefill) session.playNext(item);
     else await session.playTrack(item);
     await speakUma(session, announce);
   } else {
     // ничего не играет — announce сыграет прямо перед треком
+    const announce = picked.artists
+      ? `Включаю: ${picked.artists}, ${picked.title}`
+      : `Включаю: ${picked.title}`;
     item.announce = announce;
     if (session.waveRefill) session.playNext(item);
     else await session.playTrack(item);
@@ -155,8 +160,10 @@ async function playInstantPlaylist(session, music, query) {
   const tracks = await music.playlistTracks(pl.uid, pl.kind);
   console.log(`Плейлист «${pl.title}»: ${tracks.length} треков`);
   if (!tracks.length) return `Плейлист «${pl.title}» пустой`;
-  const announce = `Включаю плейлист: ${pl.title}`;
   const playing = session.current?.kind === 'track';
+  const announce = playing
+    ? `Добавляю плейлист ${pl.title} следующим`
+    : `Включаю плейлист: ${pl.title}`;
   for (let i = 0; i < tracks.length; i++) {
     const t = tracks[i];
     const item = trackItem(t, music);

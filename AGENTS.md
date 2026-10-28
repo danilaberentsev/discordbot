@@ -50,7 +50,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 ## Карта файлов
 
-- `src/index.js` — клиент Discord, регистрация слеш-команд, `handleUtterance`, сессии гильдий, автовход/автовыход, сообщение «сейчас играет» с кнопками (`buildNowPlayingContent`/`updateNowPlaying`/`handleNowPlayingButton`).
+- `src/index.js` — клиент Discord, регистрация слеш-команд, `handleUtterance`, сессии гильдий, автовход/автопереход/автовыход, сообщение «сейчас играет» с кнопками (`buildNowPlayingContent`/`updateNowPlaying`/`handleNowPlayingButton`).
 - `src/config.js` — единственное место чтения env (кроме `dispatch.js`, где ключи GPT читаются для фиксера).
 - `src/voice/session.js` — плеер, очередь, скачивание mp3, TTS-ресурс, громкости, звуковой сигнал (`playChime`).
 - `src/voice/connection.js` — join с `selfDeaf: false`, `debug: true` (debug можно убрать).
@@ -80,6 +80,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 10. **Флаг `starting` в `VoiceSession` обязателен.** `start()` асинхронный (качает трек), а `player.state.status` остаётся `Idle` во время загрузки. Без `starting` `startNext()` при добавлении очереди запускает все треки разом (каждый выхватывает следующий из очереди), и 9 из 10 отбрасываются как «не Idle». `startNext()` не должен запускать новый трек, пока `start()` не завершился.
 11. **Озвучка названия трека.** Когда музыка уже играет (`session.current.kind === 'track'`), добавление трека/плейлиста в очередь объявляется голосом сразу — через `speakUma`, который прерывает текущий трек и продолжает его после озвучки. Когда ничего не играет — через поле `announce`: в `start()` при его наличии и заданном `this.tts.apiKey` перед треком в очередь вставляется TTS с этим текстом, само поле удаляется (чтобы не зациклиться).
 12. **Отклик на wake-слово — звуковой сигнал во время речи.** `listener.js` детектит wake в `partial` через `findWakeToken`/`isWakeToken` (`parse.js`: точное совпадение с `config.wakeWords` + явные ослышки `WAKE_VARIANTS`; без нечёткого матчинга — он даёт ложные срабатывания на коротких wake-словах) и вызывает `onWake` → `session.playChime()` (мягкий колокольчик E5→B5 с обертонами, raw-PCM, кэш в `getChimeBuffer`). Словами «Слушаю» не отвечать — отклик должен прийти до конца фразы. Ослышки менять в `WAKE_VARIANTS`, тон/длительность — в `getChimeBuffer`.
+13. **Переход между каналами — через `moveSession` → `connection.rejoin({channelId})`, не через destroy.** Автопереход (`findPopulatedVoiceChannel` в `index.js`) переиспользует существующее `VoiceConnection`: `rejoin` шлёт VoiceStateUpdate на новый канал, а плеер, очередь и слушатель остаются на том же соединении — музыка не прерывается. Не заменять `moveSession` на `destroySession`+`getSession`: destroy дропает очередь и текущий трек.
 
 ## Особенности поиска (dispatch.js)
 

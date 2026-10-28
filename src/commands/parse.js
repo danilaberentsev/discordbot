@@ -145,6 +145,7 @@ export function stripWake(text) {
 
 const SKIP_WORDS = new Set(['дальше', 'следующий', 'следующая', 'следующую', 'next', 'другой', 'другую', 'скип']);
 const SKIP_NOUNS = new Set(['трек', 'треки', 'трэк', 'песню', 'песня', 'песни', 'композицию', 'композиция']);
+const STOP_WORDS = new Set(['стоп', 'хватит', 'все', 'выключи', 'выключить', 'останови', 'остановить', 'отключи', 'отключить']);
 const STOP_NOUNS = new Set(['музыку', 'музыка', 'песню', 'песни', 'трек', 'треки', 'звук']);
 
 function isSkipIntent(t) {
@@ -154,8 +155,7 @@ function isSkipIntent(t) {
 
 function isStopIntent(t) {
   const [first, ...rest] = t.split(' ');
-  return (first === 'стоп' || first === 'хватит' || first === 'все')
-    && rest.every((tok) => STOP_NOUNS.has(tok));
+  return STOP_WORDS.has(first) && rest.every((tok) => STOP_NOUNS.has(tok));
 }
 
 export function parseCommand(text) {

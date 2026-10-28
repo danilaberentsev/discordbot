@@ -53,6 +53,12 @@ const commands = [
       .setRequired(true)
       .setMinValue(5)
       .setMaxValue(100)),
+  new SlashCommandBuilder().setName('ask')
+    .setDescription('Задать вопрос Аделине')
+    .addStringOption((option) => option
+      .setName('query')
+      .setDescription('Вопрос')
+      .setRequired(true)),
 ].map((command) => command.toJSON());
 
 client.once(Events.ClientReady, async (ready) => {
@@ -87,9 +93,22 @@ function getSession(guild, channel, textChannelId) {
     onUtterance: (text, userId, startedAt) => {
       handleUtterance(guild.id, text, userId, startedAt).catch((err) => console.error(err));
     },
+    onSpeechStart: () => {
+      const record = sessions.get(guild.id);
+      if (record && record.listeningUntil > Date.now()) {
+        record.session.duckMusic();
+      }
+    },
     onWake: () => {
       const record = sessions.get(guild.id);
-      if (record) record.session.playChime();
+      if (record) {
+        record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
+        record.session.duckMusic();
+        record.session.playChime();
+      }
+    },
+    onEnd: () => {
+      sessions.get(guild.id)?.session.unduckMusic();
     },
   });
   listener.start();
@@ -395,6 +414,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const query = interaction.options.getString('query', true);
         const result = await playMusic(record.session, record.music, query);
         await interaction.editReply(result);
+        break;
+      }
+      case 'ask': {
+        const query = interaction.options.getString('query', true);
+        if (!assistant) {
+          await interaction.reply({ content: 'Ассистент не настроен (нужен DEEPSEEK_API_KEY)', ephemeral: true });
+          return;
+        }
+        await interaction.deferReply();
+        try {
+          const answer = await assistant.ask(interaction.user.id, query);
+          const text = answer?.trim() || 'Что-то я не поняла, попробуй иначе';
+          const record = sessions.get(interaction.guild.id);
+          if (record) {
+            record.listeningUntil = 0;
+            await speakUma(record.session, text);
+          }
+          await interaction.editReply(text);
+        } catch (err) {
+          console.error('Ассистент (ask):', err.message);
+          await interaction.editReply('Что-то пошло не так');
+        }
         break;
       }
       default:

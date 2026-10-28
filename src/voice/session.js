@@ -170,6 +170,8 @@ export class VoiceSession {
     this.tts = tts;
     this.onTrackStart = null;
     this.onIdle = null;
+    this.ducked = false;
+    this.duckTimer = null;
 
     this.player = createAudioPlayer();
     connection.subscribe(this.player);
@@ -220,7 +222,7 @@ export class VoiceSession {
         ? await ttsResource(item.text, item.apiKey, item.voice)
         : item.kind === 'chime'
           ? item.resource
-          : await trackResource(item, this.musicVolume);
+          : await trackResource(item, this.ducked ? 0 : this.musicVolume);
       if (token !== this.startToken || this.player.state.status !== AudioPlayerStatus.Idle) {
         try {
           resource.playStream.destroy();
@@ -314,16 +316,38 @@ export class VoiceSession {
 
   setVolume(value) {
     this.musicVolume = clampVolume(value);
-    if (this.current?.kind === 'track') {
-      this.currentResource?.volume?.setVolume(this.musicVolume);
-    }
+    this.applyMusicVolume();
     return this.musicVolume;
+  }
+
+  // приглушить музыку (0) на время голосовой команды, не трогая musicVolume
+  duckMusic() {
+    if (this.ducked) return;
+    this.ducked = true;
+    this.applyMusicVolume();
+    clearTimeout(this.duckTimer);
+    this.duckTimer = setTimeout(() => this.unduckMusic(), 30000);
+  }
+
+  unduckMusic() {
+    if (!this.ducked) return;
+    this.ducked = false;
+    clearTimeout(this.duckTimer);
+    this.applyMusicVolume();
+  }
+
+  applyMusicVolume() {
+    const volume = this.ducked ? 0 : this.musicVolume;
+    if (this.current?.kind === 'track') {
+      this.currentResource?.volume?.setVolume(volume);
+    }
   }
 
   destroy() {
     this.startToken++;
     this.queue = [];
     this.waveRefill = null;
+    clearTimeout(this.duckTimer);
     try {
       this.player.stop(true);
     } catch {

@@ -30,7 +30,7 @@ class OpusDecoder extends Transform {
 }
 
 export class VoiceListener {
-  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, onWake, guild } = {}) {
+  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, onWake, onEnd, onSpeechStart, guild } = {}) {
     this.connection = connection;
     this.botId = botId;
     this.apiKey = apiKey ?? '';
@@ -38,6 +38,8 @@ export class VoiceListener {
     this.sampleRate = sampleRate ?? 48000;
     this.onUtterance = onUtterance ?? null;
     this.onWake = onWake ?? null;
+    this.onEnd = onEnd ?? null;
+    this.onSpeechStart = onSpeechStart ?? null;
     this.guild = guild ?? null;
     this.users = new Map();
     this.busy = new Set();
@@ -80,6 +82,7 @@ export class VoiceListener {
       sub: null, dec: null, recognizer: null, chunks: [], bytes: 0, startedAt: Date.now(), wakeFired: false,
     };
     this.users.set(userId, entry);
+    this.onSpeechStart?.(userId);
 
     if (!this.apiKey) {
       console.log('Речь замечена, но YANDEX_CLOUD_API_KEY не задан, распознавание выключено');
@@ -126,6 +129,7 @@ export class VoiceListener {
   async endUser(userId) {
     const entry = this.users.get(userId);
     if (!entry) return;
+    this.onEnd?.(userId);
     const pcm = Buffer.concat(entry.chunks);
     const startedAt = entry.startedAt;
     const recognizer = entry.recognizer;

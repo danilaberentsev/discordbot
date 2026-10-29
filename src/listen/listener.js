@@ -9,18 +9,22 @@ class OpusDecoder extends Transform {
   constructor(rate) {
     super();
     this.decoder = new OpusScript(rate, 1, OpusScript.Application.AUDIO);
+    this.brokenPackets = 0;
   }
 
   _transform(chunk, encoding, done) {
     try {
       this.push(this.decoder.decode(chunk));
     } catch {
-      console.warn('Пропущен битый opus-пакет');
+      this.brokenPackets++;
     }
     done();
   }
 
   _destroy(err, done) {
+    if (this.brokenPackets) {
+      console.log(`Пропущено битых opus-пакетов: ${this.brokenPackets}`);
+    }
     try {
       this.decoder.delete();
     } catch {

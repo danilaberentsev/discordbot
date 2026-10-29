@@ -236,7 +236,7 @@ export class VoiceSession {
       if (item.kind === 'track') this.onTrackStart?.(item);
       started = true;
     } catch (err) {
-      console.error('Не удалось запустить элемент очереди:', err.message);
+      console.error('Не удалось запустить элемент очереди:', err.message, err.cause ?? '');
     } finally {
       this.starting = false;
     }

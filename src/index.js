@@ -378,8 +378,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await interaction.reply({ content: 'Зайди в голосовой канал, потом зови', ephemeral: true });
           return;
         }
+        await interaction.deferReply();
         getSession(interaction.guild, voiceChannel, interaction.channelId);
-        await interaction.reply(`Села в «${voiceChannel.name}».`);
+        await interaction.editReply(`Села в «${voiceChannel.name}».`);
         break;
       }
       case 'leave': {
@@ -502,6 +503,14 @@ function findPopulatedVoiceChannel(guild, excludeChannelId) {
     && channel.members?.some((member) => !member.user.bot)
   ) ?? null;
 }
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection:', reason instanceof Error ? reason.stack : reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err?.stack ?? err);
+});
 
 if (!config.discordToken) {
   console.error('Нет DISCORD_TOKEN в .env');

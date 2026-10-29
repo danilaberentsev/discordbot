@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 
 const ENDPOINT = 'stt.api.cloud.yandex.net:443';
 const MODEL = 'general:rc';
+const DEADLINE_MS = 180_000;
 
 const LINEAR16_PCM = 1;
 const TEXT_NORMALIZATION_ENABLED = 1;
@@ -22,6 +23,12 @@ const pkgDef = loadSync(join(here, 'proto', 'stt_service.proto'), {
   includeDirs: [join(here, 'proto')],
 });
 const { Recognizer } = loadPackageDefinition(pkgDef).speechkit.stt.v3;
+
+let sharedClient = null;
+function getClient() {
+  if (!sharedClient) sharedClient = new Recognizer(ENDPOINT, credentials.createSsl());
+  return sharedClient;
+}
 
 function sessionOptions({ language, sampleRate, audioProcessingType }) {
   return {
@@ -48,10 +55,9 @@ function sessionOptions({ language, sampleRate, audioProcessingType }) {
 }
 
 function openStream(apiKey, { language, sampleRate, audioProcessingType }) {
-  const client = new Recognizer(ENDPOINT, credentials.createSsl());
   const metadata = new Metadata();
   metadata.set('authorization', `Api-Key ${apiKey}`);
-  const stream = client.RecognizeStreaming(metadata, { deadline: Date.now() + 60000 });
+  const stream = getClient().RecognizeStreaming(metadata, { deadline: Date.now() + DEADLINE_MS });
   stream.write(sessionOptions({ language, sampleRate, audioProcessingType }));
   return stream;
 }

@@ -36,8 +36,8 @@ const FOLLOWUP_WINDOW_MS = 3000;
 const JOIN_GREETING = 'Всем привет!';
 
 const commands = [
-  new SlashCommandBuilder().setName('join').setDescription('Позвать Аделину в голосовой канал'),
-  new SlashCommandBuilder().setName('leave').setDescription('Выгнать Аделину из канала'),
+  new SlashCommandBuilder().setName('join').setDescription('Позвать Марусю в голосовой канал'),
+  new SlashCommandBuilder().setName('leave').setDescription('Выгнать Марусю из канала'),
   new SlashCommandBuilder().setName('play')
     .setDescription('Включить трек по поиску')
     .addStringOption((option) => option
@@ -54,7 +54,7 @@ const commands = [
       .setMinValue(5)
       .setMaxValue(100)),
   new SlashCommandBuilder().setName('ask')
-    .setDescription('Задать вопрос Аделине')
+    .setDescription('Задать вопрос Марусе')
     .addStringOption((option) => option
       .setName('query')
       .setDescription('Вопрос')

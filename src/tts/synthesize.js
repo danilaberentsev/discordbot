@@ -5,6 +5,7 @@ export async function speakUma(session, text, onEnd) {
     console.log(`[TTS выключен] ${text}`);
     return;
   }
+  console.log(`Ответ: "${text}"`);
   try {
     await session.speakText(text, { apiKey: config.cloudApiKey, voice: config.ttsVoice, onEnd });
   } catch (err) {

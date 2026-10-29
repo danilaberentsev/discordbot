@@ -4,7 +4,7 @@
 
 ## Контекст
 
-Discord-бот «Аделина» (пакет `discordbot-alisa`) на Node.js (ESM, `type: module`). Голосовой канал: wake-слово → речь в текст (Yandex SpeechKit) → команда (музыка Яндекс Музыки / вопрос YandexGPT) → ответ голосом (SpeechKit TTS).
+Discord-бот «Маруся» (пакет `discordbot-marusya`) на Node.js (ESM, `type: module`). Голосовой канал: wake-слово → речь в текст (Yandex SpeechKit) → команда (музыка Яндекс Музыки / вопрос YandexGPT) → ответ голосом (SpeechKit TTS).
 
 Общение с пользователем — по-русски. Проект pet/экспериментальный: код без лишних комментариев, стиль минималистичный, ESM-импорты, `console.log` для логов.
 
@@ -64,7 +64,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 - `src/commands/dispatch.js` — `runMusicCommand`, `playMusic`, `playWave` (очередь из чарта), instant-поиск трека/плейлиста.
 - `src/commands/translit.js` — `translitFallbacks` (транслит-кандидаты для фикса кириллицы).
 - `src/assistant/llm.js` — `askDeepSeek` (OpenAI-совместимый API DeepSeek, модель по умолчанию `deepseek-chat`), `fixUtterance`.
-- `src/assistant/context.js` — история диалога, системный промпт «Аделина».
+- `src/assistant/context.js` — история диалога, системный промпт «Маруся».
 
 ## Инварианты, которые нельзя ломать
 
@@ -100,7 +100,7 @@ node -e "require('dotenv').config(); fetch('https://stt.api.cloud.yandex.net/spe
 
 ## Логи и отладка
 
-Ключевые строки: `Услышала (id)`, `Голос -> команда`, `Поиск instant «...»: треков N`, `Поиск instant кандидат «...»`, `Поиск instant плейлистов «...»`, `Плейлист «...»: N треков`, `Выбран трек`, `[player]`, `[voice]`.
+Ключевые строки: `Услышала (id)`, `Голос -> команда`, `Ответ: "..."`, `Поиск instant «...»: треков N`, `Поиск instant кандидат «...»`, `Поиск instant плейлистов «...»`, `Плейлист «...»: N треков`, `Выбран трек`, `[player]`, `[voice]`.
 
 Probe-интервал в `VoiceSession` закомментирован — при отладке звука можно временно включить.
 
@@ -110,7 +110,6 @@ Probe-интервал в `VoiceSession` закомментирован — пр
 - «Смешанный язык» запросов (латиница + кириллица в одном названии).
 - Убрать `debug: true` из `voice/connection.js` перед продакшеном.
 - Нет тестов; при добавлении — Vitest/Jest не настроены, выбирать осознанно.
-- Пакет всё ещё называется `discordbot-alisa`, бот — «Аделина».
 
 ## Git
 

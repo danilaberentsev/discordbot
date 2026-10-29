@@ -10,7 +10,7 @@ export const config = {
   sttSampleRate: 48000,
   ttsVoice: process.env.TTS_VOICE ?? 'alena',
   followupEnabled: process.env.FOLLOWUP_ENABLED === 'true',
-  wakeWords: (process.env.WAKE_WORDS ?? 'аделина,adelina,аделинка,аделя,адель')
+  wakeWords: (process.env.WAKE_WORDS ?? 'маруся,marusya,марусь,руся,русь')
     .split(',')
     .map((word) => word.trim().toLowerCase())
     .filter(Boolean),

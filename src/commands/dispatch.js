@@ -1,6 +1,6 @@
 import { fixUtterance } from '../assistant/llm.js';
 import { translitFallbacks } from './translit.js';
-import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord, isMyWaveIntent } from './parse.js';
+import { cleanQuery, isWaveIntent, isPlaylistIntent, stripPlaylistWord, isMyWaveIntent, numbersToDigits } from './parse.js';
 import { config } from '../config.js';
 import { speakUma } from '../tts/synthesize.js';
 
@@ -171,6 +171,13 @@ async function playInstant(session, music, query, fixer) {
   if (!tracks.length && /[а-яё]/i.test(query)) {
     tracks = await instantSearchFixed(music, query, fixer);
   }
+  if (!tracks.length) {
+    const digits = numbersToDigits(query);
+    if (digits && digits !== query) {
+      tracks = await music.instantSearch(digits);
+      console.log(`Поиск instant «${digits}»: треков ${tracks.length}`);
+    }
+  }
   const picked = tracks[0];
   if (!picked) return `Ничего не нашла по запросу ${query}`;
   return startPicked(session, music, picked);
@@ -196,8 +203,15 @@ async function instantSearchFixed(music, query, fixer) {
 }
 
 async function playInstantPlaylist(session, music, query) {
-  const playlists = await music.instantPlaylists(query);
+  let playlists = await music.instantPlaylists(query);
   console.log(`Поиск instant плейлистов «${query}»: ${playlists.length}`);
+  if (!playlists.length) {
+    const digits = numbersToDigits(query);
+    if (digits && digits !== query) {
+      playlists = await music.instantPlaylists(digits);
+      console.log(`Поиск instant плейлистов «${digits}»: ${playlists.length}`);
+    }
+  }
   const pl = playlists[0];
   if (!pl) return `Не нашла плейлист по запросу ${query}`;
   const tracks = await music.playlistTracks(pl.uid, pl.kind);

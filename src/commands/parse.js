@@ -43,6 +43,48 @@ export function cleanQuery(text) {
   return tokens.join(' ').trim();
 }
 
+// русские числительные → цифры для поиска («две тысячи десять» → «2010»)
+const NUM_UNITS = { ноль: 0, один: 1, одна: 1, одно: 1, два: 2, две: 2, три: 3, четыре: 4, пять: 5, шесть: 6, семь: 7, восемь: 8, девять: 9 };
+const NUM_TEENS = { десять: 10, одиннадцать: 11, двенадцать: 12, тринадцать: 13, четырнадцать: 14, пятнадцать: 15, шестнадцать: 16, семнадцать: 17, восемнадцать: 18, девятнадцать: 19 };
+const NUM_TENS = { двадцать: 20, тридцать: 30, сорок: 40, пятьдесят: 50, шестьдесят: 60, семьдесят: 70, восемьдесят: 80, девяносто: 90 };
+const NUM_HUNDREDS = { сто: 100, двести: 200, триста: 300, четыреста: 400, пятьсот: 500, шестьсот: 600, семьсот: 700, восемьсот: 800, девятьсот: 900 };
+const NUM_SCALES = { тысяча: 1e3, тысячи: 1e3, тысяч: 1e3, миллион: 1e6, миллиона: 1e6, миллионов: 1e6 };
+
+function isNumberWord(t) {
+  return NUM_UNITS[t] !== undefined || NUM_TEENS[t] !== undefined || NUM_TENS[t] !== undefined
+    || NUM_HUNDREDS[t] !== undefined || NUM_SCALES[t] !== undefined;
+}
+
+function parseNumberRun(tokens) {
+  let total = 0;
+  let current = 0;
+  for (const t of tokens) {
+    if (NUM_UNITS[t] !== undefined) current += NUM_UNITS[t];
+    else if (NUM_TEENS[t] !== undefined) current += NUM_TEENS[t];
+    else if (NUM_TENS[t] !== undefined) current += NUM_TENS[t];
+    else if (NUM_HUNDREDS[t] !== undefined) current += NUM_HUNDREDS[t];
+    else if (NUM_SCALES[t] !== undefined) { total += (current || 1) * NUM_SCALES[t]; current = 0; }
+    else return null;
+  }
+  return total + current;
+}
+
+export function numbersToDigits(text) {
+  const tokens = text.split(' ');
+  const out = [];
+  for (let i = 0; i < tokens.length;) {
+    if (isNumberWord(tokens[i])) {
+      let j = i;
+      while (j < tokens.length && isNumberWord(tokens[j])) j += 1;
+      const n = parseNumberRun(tokens.slice(i, j));
+      if (n !== null) { out.push(String(n)); i = j; continue; }
+    }
+    out.push(tokens[i]);
+    i += 1;
+  }
+  return out.join(' ');
+}
+
 // «моя волна» — персональная радиостанция (отличается от топ-чарта «волны»)
 const MY_WAVE_PHRASES = new Set(['моя волна', 'мою волну', 'моей волны']);
 

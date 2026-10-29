@@ -99,10 +99,11 @@ function getSession(guild, channel, textChannelId) {
         record.session.duckMusic();
       }
     },
-    onWake: () => {
+    onWake: (userId) => {
       const record = sessions.get(guild.id);
       if (record) {
         record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
+        record.wakeUserId = userId;
         record.session.duckMusic();
         record.session.playChime();
       }
@@ -121,6 +122,7 @@ function getSession(guild, channel, textChannelId) {
     listener,
     music,
     listeningUntil: 0,
+    wakeUserId: null,
     textChannelId: textChannelId ?? null,
     nowPlayingMessage: null,
   };
@@ -293,6 +295,7 @@ async function handleUtterance(guildId, text, userId, startedAt) {
 
   if (matched) {
     console.log(`Голос -> команда: "${rest}" (wake: «${wakeToken}», было: "${text}")`);
+    record.wakeUserId = userId;
     if (rest) {
       await runCommand(record, rest, userId);
     } else {
@@ -303,6 +306,8 @@ async function handleUtterance(guildId, text, userId, startedAt) {
 
   // окно активно, если юзер НАЧАЛ говорить до его истечения
   if (record.listeningUntil && (startedAt ?? Date.now()) < record.listeningUntil) {
+    // команду принимаем только от того, кто позвал
+    if (record.wakeUserId !== userId) return;
     // стоп-слово в любом месте фразы («хватит», «замолчи», «прекрати»…) выключает слушание
     if (hasStopWord(text) || parseCommand(text)?.action === 'stop') {
       record.listeningUntil = 0;
@@ -337,6 +342,7 @@ async function runCommand(record, text, userId) {
           // окно слушания стартует после того, как озвучка закончится
           await speakUma(record.session, answer, () => {
             record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
+            record.wakeUserId = userId;
           });
         } else {
           await speakUma(record.session, answer);

@@ -166,8 +166,10 @@ export function isWakeToken(token) {
   return false;
 }
 
+// wake-слово засчитывается только первым словом фразы: «маруся, включи ...»
 export function findWakeToken(text) {
-  return normalize(text).split(' ').find(isWakeToken) ?? null;
+  const [first] = normalize(text).split(' ');
+  return first && isWakeToken(first) ? first : null;
 }
 
 export function hasWakeWord(text) {
@@ -177,12 +179,13 @@ export function hasWakeWord(text) {
 export function stripWake(text) {
   const norm = normalize(text);
   const tokens = norm.split(' ');
-  const wakeToken = tokens.find(isWakeToken);
-  if (!wakeToken) {
+  let i = 0;
+  while (i < tokens.length && isWakeToken(tokens[i])) i += 1;
+  if (i === 0) {
     return { matched: false, rest: norm, wakeToken: null };
   }
-  const rest = tokens.filter((token) => !isWakeToken(token)).join(' ').trim();
-  return { matched: true, rest, wakeToken };
+  const rest = tokens.slice(i).join(' ').trim();
+  return { matched: true, rest, wakeToken: tokens[0] };
 }
 
 const SKIP_WORDS = new Set(['дальше', 'следующий', 'следующая', 'следующую', 'next', 'другой', 'другую', 'скип']);

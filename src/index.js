@@ -19,6 +19,7 @@ import { VoiceSession } from './voice/session.js';
 import { VoiceListener } from './listen/listener.js';
 import { YandexMusicClient } from './music/client.js';
 import { stripWake, parseCommand } from './commands/parse.js';
+import { resolveCommand } from './commands/resolve.js';
 import { runMusicCommand, playMusic } from './commands/dispatch.js';
 import { Assistant } from './assistant/context.js';
 import { speakUma } from './tts/synthesize.js';
@@ -320,7 +321,7 @@ async function handleUtterance(guildId, text, userId, startedAt) {
 }
 
 async function runCommand(record, text, userId) {
-  const cmd = parseCommand(text);
+  const cmd = await resolveCommand(text, { apiKey: config.deepseekApiKey });
   if (!cmd) return false;
 
   if (cmd.action === 'leave') {

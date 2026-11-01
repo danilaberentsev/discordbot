@@ -10,6 +10,7 @@ import { get as httpsGet } from 'node:https';
 const MUSIC_VOLUME_DEFAULT = 0.20;
 const TTS_VOLUME_DEFAULT = 2.6;
 const CHIME_VOLUME = 1.0;
+const DUCK_MAX_MS = 60_000;
 
 function clampVolume(value) {
   return Math.min(1, Math.max(0.05, value));
@@ -171,6 +172,7 @@ export class VoiceSession {
     this.onTrackStart = null;
     this.onIdle = null;
     this.ducked = false;
+    this.duckPaused = false;
     this.duckTimer = null;
 
     this.player = createAudioPlayer();
@@ -189,6 +191,10 @@ export class VoiceSession {
     this.player.on('stateChange', (oldState, newState) => {
       if (oldState.status !== newState.status) {
         console.log(`[player] ${oldState.status} -> ${newState.status}`);
+      }
+      // если трек стартует во время приглушения (после chime/озвучки) — сразу пауза
+      if (this.ducked && newState.status === AudioPlayerStatus.Playing && this.current?.kind === 'track') {
+        this.duckPaused = this.player.pause() || this.duckPaused;
       }
     });
     this.connection.on('stateChange', (oldState, newState) => {
@@ -222,7 +228,7 @@ export class VoiceSession {
         ? await ttsResource(item.text, item.apiKey, item.voice)
         : item.kind === 'chime'
           ? item.resource
-          : await trackResource(item, this.ducked ? 0 : this.musicVolume);
+          : await trackResource(item, this.musicVolume);
       if (token !== this.startToken || this.player.state.status !== AudioPlayerStatus.Idle) {
         try {
           resource.playStream.destroy();
@@ -320,26 +326,32 @@ export class VoiceSession {
     return this.musicVolume;
   }
 
-  // приглушить музыку (0) на время голосовой команды, не трогая musicVolume
+  // пауза музыки на время голосовой команды, позиция трека сохраняется
   duckMusic() {
-    if (this.ducked) return;
     this.ducked = true;
-    this.applyMusicVolume();
     clearTimeout(this.duckTimer);
-    this.duckTimer = setTimeout(() => this.unduckMusic(), 30000);
+    // страховка: если ответ так и не пришёл, вернуть музыку
+    this.duckTimer = setTimeout(() => this.unduckMusic(), DUCK_MAX_MS);
+    if (this.player.state.status === AudioPlayerStatus.Playing && this.current?.kind === 'track') {
+      this.duckPaused = this.player.pause() || this.duckPaused;
+    }
   }
 
   unduckMusic() {
     if (!this.ducked) return;
     this.ducked = false;
     clearTimeout(this.duckTimer);
-    this.applyMusicVolume();
+    // возобновляем только свою паузу, ручную паузу пользователя не трогаем
+    const wasDuckPaused = this.duckPaused;
+    this.duckPaused = false;
+    if (wasDuckPaused && this.player.state.status === AudioPlayerStatus.Paused) {
+      this.player.unpause();
+    }
   }
 
   applyMusicVolume() {
-    const volume = this.ducked ? 0 : this.musicVolume;
     if (this.current?.kind === 'track') {
-      this.currentResource?.volume?.setVolume(volume);
+      this.currentResource?.volume?.setVolume(this.musicVolume);
     }
   }
 

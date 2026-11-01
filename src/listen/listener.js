@@ -34,7 +34,7 @@ class OpusDecoder extends Transform {
 }
 
 export class VoiceListener {
-  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, onWake, onEnd, onSpeechStart, guild } = {}) {
+  constructor(connection, botId, { apiKey, language, sampleRate, onUtterance, onWake, onEnd, onSpeechStart, onNoUtterance, guild } = {}) {
     this.connection = connection;
     this.botId = botId;
     this.apiKey = apiKey ?? '';
@@ -44,6 +44,7 @@ export class VoiceListener {
     this.onWake = onWake ?? null;
     this.onEnd = onEnd ?? null;
     this.onSpeechStart = onSpeechStart ?? null;
+    this.onNoUtterance = onNoUtterance ?? null;
     this.guild = guild ?? null;
     this.users = new Map();
     this.busy = new Set();
@@ -56,6 +57,10 @@ export class VoiceListener {
     const member = this.guild?.voiceStates?.cache?.get(userId)?.member
       ?? this.guild?.members?.cache?.get(userId);
     return member?.displayName ?? userId;
+  }
+
+  isRecording() {
+    return this.users.size > 0;
   }
 
   start() {
@@ -142,19 +147,23 @@ export class VoiceListener {
 
     if (pcm.length < this.sampleRate * 2 * 0.3 || this.busy.has(userId)) {
       recognizer?.abort();
+      this.onNoUtterance?.(userId);
       return;
     }
     this.busy.add(userId);
 
     try {
       const text = await this.finalizeText(recognizer, pcm);
-      if (text) {
-        const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
-        console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${text}`);
-        this.onUtterance?.(text, userId, startedAt);
+      if (!text) {
+        this.onNoUtterance?.(userId);
+        return;
       }
+      const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
+      console.log(`[${time}] Услышала (${this.resolveName(userId)}): ${text}`);
+      this.onUtterance?.(text, userId, startedAt);
     } catch (err) {
       console.error('STT:', err.message);
+      this.onNoUtterance?.(userId);
     } finally {
       this.busy.delete(userId);
     }

@@ -34,7 +34,32 @@ const assistant = config.deepseekApiKey
   : null;
 const LISTEN_WINDOW_MS = 8000;
 const FOLLOWUP_WINDOW_MS = 3000;
+const DUCK_RELEASE_FALLBACK_MS = 30000;
 const JOIN_GREETING = 'Всем привет!';
+
+// Музыка приглушается с wake-слова и остаётся тихой, пока бот не ответит
+// (STT -> поиск -> LLM -> озвучка). releaseDuck вызывается, когда ответ уже
+// поставлен в очередь на озвучку или когда отвечать нечего.
+function releaseDuck(record) {
+  record.ducking = false;
+  clearTimeout(record.duckRelease);
+  record.duckRelease = null;
+  record.session.unduckMusic();
+}
+
+// страховка на случай, если после речи так и не пришло ни команды, ни ответа
+function scheduleDuckRelease(record, delay = DUCK_RELEASE_FALLBACK_MS) {
+  record.ducking = true;
+  record.session.duckMusic();
+  clearTimeout(record.duckRelease);
+  record.duckRelease = setTimeout(() => {
+    if (record.listener.isRecording()) {
+      scheduleDuckRelease(record, delay);
+      return;
+    }
+    releaseDuck(record);
+  }, delay);
+}
 
 const commands = [
   new SlashCommandBuilder().setName('join').setDescription('Позвать Марусю в голосовой канал'),
@@ -94,23 +119,26 @@ function getSession(guild, channel, textChannelId) {
     onUtterance: (text, userId, startedAt) => {
       handleUtterance(guild.id, text, userId, startedAt).catch((err) => console.error(err));
     },
-    onSpeechStart: () => {
+    onSpeechStart: (userId) => {
       const record = sessions.get(guild.id);
-      if (record && record.listeningUntil > Date.now()) {
-        record.session.duckMusic();
-      }
+      if (!record || record.listeningUntil <= Date.now()) return;
+      // чужую речь во время чужого запроса не приглушаем повторно
+      if (record.wakeUserId && record.wakeUserId !== userId) return;
+      scheduleDuckRelease(record);
     },
     onWake: (userId) => {
       const record = sessions.get(guild.id);
       if (record) {
         record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
         record.wakeUserId = userId;
-        record.session.duckMusic();
+        scheduleDuckRelease(record);
         record.session.playChime();
       }
     },
-    onEnd: () => {
-      sessions.get(guild.id)?.session.unduckMusic();
+    onNoUtterance: (userId) => {
+      // речь была, но текста нет (тишина/шум/ошибка STT) — держать паузу незачем
+      const record = sessions.get(guild.id);
+      if (record?.ducking && record.wakeUserId === userId) releaseDuck(record);
     },
   });
   listener.start();
@@ -124,6 +152,8 @@ function getSession(guild, channel, textChannelId) {
     music,
     listeningUntil: 0,
     wakeUserId: null,
+    ducking: false,
+    duckRelease: null,
     textChannelId: textChannelId ?? null,
     nowPlayingMessage: null,
   };
@@ -138,6 +168,7 @@ function destroySession(guildId) {
   const record = sessions.get(guildId);
   if (!record) return;
   sessions.delete(guildId);
+  clearTimeout(record.duckRelease);
   try {
     record.session.destroy();
   } catch (err) {
@@ -322,6 +353,8 @@ async function handleUtterance(guildId, text, userId, startedAt) {
       await runCommand(record, rest, userId);
     } else {
       record.listeningUntil = Date.now() + LISTEN_WINDOW_MS;
+      // ждём продолжение после одного wake-слова, музыку пока не поднимаем
+      scheduleDuckRelease(record, LISTEN_WINDOW_MS);
     }
     return;
   }
@@ -334,6 +367,7 @@ async function handleUtterance(guildId, text, userId, startedAt) {
     if (hasStopWord(text) || parseCommand(text)?.action === 'stop') {
       record.listeningUntil = 0;
       await speakUma(record.session, 'Молчу');
+      releaseDuck(record);
       return;
     }
     console.log(`Голос -> команда (без wake): "${text}"`);
@@ -342,53 +376,59 @@ async function handleUtterance(guildId, text, userId, startedAt) {
 }
 
 async function runCommand(record, text, userId) {
-  const cmd = await resolveCommand(text, { apiKey: config.deepseekApiKey });
-  if (!cmd) return false;
+  try {
+    const cmd = await resolveCommand(text, { apiKey: config.deepseekApiKey });
+    if (!cmd) return false;
 
-  if (cmd.action === 'leave') {
-    destroySession(record.connection.joinConfig.guildId);
-    return true;
-  }
-
-  if (cmd.action === 'assistant') {
-    if (!assistant) {
-      console.log('Ассистент не настроен, нужен DEEPSEEK_API_KEY');
-      await speakUma(record.session, 'Ассистент пока не настроен');
+    if (cmd.action === 'leave') {
+      destroySession(record.connection.joinConfig.guildId);
       return true;
     }
-    try {
-      record.listeningUntil = 0;
-      const answer = await assistant.ask(userId, cmd.text);
-      if (answer) {
-        if (config.followupEnabled) {
-          // окно слушания стартует после того, как озвучка закончится
-          await speakUma(record.session, answer, () => {
-            record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
-            record.wakeUserId = userId;
-          });
-        } else {
-          await speakUma(record.session, answer);
+
+    if (cmd.action === 'assistant') {
+      if (!assistant) {
+        console.log('Ассистент не настроен, нужен DEEPSEEK_API_KEY');
+        await speakUma(record.session, 'Ассистент пока не настроен');
+        return true;
+      }
+      try {
+        record.listeningUntil = 0;
+        const answer = await assistant.ask(userId, cmd.text);
+        if (answer) {
+          if (config.followupEnabled) {
+            // окно слушания стартует после того, как озвучка закончится
+            await speakUma(record.session, answer, () => {
+              record.listeningUntil = Date.now() + FOLLOWUP_WINDOW_MS;
+              record.wakeUserId = userId;
+            });
+          } else {
+            await speakUma(record.session, answer);
+          }
         }
+      } catch (err) {
+        console.error('Ассистент:', err.message);
+        await speakUma(record.session, 'Что-то я тебе не поняла, попробуй ещё раз');
+      }
+      return true;
+    }
+
+    // музыкальные команды выключают режим диалога
+    record.listeningUntil = 0;
+    try {
+      const reply = await runMusicCommand(record.session, record.music, cmd);
+      if (reply && !reply.startsWith('Включаю')) {
+        await speakUma(record.session, reply);
       }
     } catch (err) {
-      console.error('Ассистент:', err.message);
-      await speakUma(record.session, 'Что-то я тебе не поняла, попробуй ещё раз');
+      console.error('Команда:', err.message);
+      await speakUma(record.session, `Не получилось: ${err.message}`);
     }
     return true;
+  } finally {
+    // ответ уже поставлен в очередь (озвучка прерывает музыку), можно вернуть громкость:
+    // трек заиграет на полной сразу после озвучки
+    releaseDuck(record);
   }
-
-  // музыкальные команды выключают режим диалога
-  record.listeningUntil = 0;
-  try {
-    const reply = await runMusicCommand(record.session, record.music, cmd);
-    if (reply && !reply.startsWith('Включаю')) {
-      await speakUma(record.session, reply);
-    }
-  } catch (err) {
-    console.error('Команда:', err.message);
-    await speakUma(record.session, `Не получилось: ${err.message}`);
-  }
-  return true;
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {

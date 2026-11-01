@@ -163,29 +163,44 @@ function moveSession(record, channel) {
   console.log(`Перехожу в «${channel.name}»`);
 }
 
-function buildNowPlayingContent(record) {
+const QUEUE_LIMIT = 15;
+
+function trackLabel(track) {
+  return track.artists ? `${track.artists} — ${track.title}` : track.title;
+}
+
+function buildQueueDescription(record) {
   const { session } = record;
-  const current = session.current;
-  const status = session.player.state.status;
-
-  let description;
-  let color;
-  if (current?.kind === 'track') {
-    const label = current.artists ? `${current.artists} — ${current.title}` : current.title;
-    if (status === AudioPlayerStatus.Paused) {
-      description = `⏸ Пауза: ${label}`;
-      color = 0xf1c40f;
-    } else {
-      description = `▶ Играет: ${label}`;
-      color = 0x2ecc71;
-    }
-  } else {
-    description = '⏹ Ничего не играет';
-    color = 0x95a5a6;
+  const current = session.current?.kind === 'track' ? session.current : null;
+  const upcoming = session.queue.filter((item) => item.kind === 'track');
+  const shown = upcoming.slice(0, QUEUE_LIMIT);
+  const marker = session.player.state.status === AudioPlayerStatus.Paused ? '⏸' : '▶';
+  const lines = [];
+  if (current) lines.push(`${marker} 1. ${trackLabel(current)}`);
+  shown.forEach((track, index) => {
+    lines.push(`${current ? index + 2 : index + 1}. ${trackLabel(track)}`);
+  });
+  if (upcoming.length > shown.length) {
+    lines.push(`…и ещё ${upcoming.length - shown.length}`);
   }
+  if (!lines.length) return 'Очередь пуста';
+  const content = lines.join('\n');
+  return content.length > 3900 ? `${content.slice(0, 3897)}…` : content;
+}
 
-  const embed = new EmbedBuilder().setTitle('Плеер').setDescription(description).setColor(color);
+function buildNowPlayingEmbed(record) {
+  const { session } = record;
+  const paused = session.player.state.status === AudioPlayerStatus.Paused;
+  const embed = new EmbedBuilder()
+    .setTitle('Плеер')
+    .setDescription(buildQueueDescription(record))
+    .setColor(paused ? 0xf1c40f : 0x2ecc71);
   embed.addFields({ name: '🔊 Громкость', value: `${Math.round(session.musicVolume * 100)}%`, inline: true });
+  return embed;
+}
+
+function buildNowPlayingContent(record) {
+  const status = record.session.player.state.status;
   const toggle = status === AudioPlayerStatus.Paused
     ? new ButtonBuilder().setCustomId('np:resume').setEmoji('▶️').setStyle(ButtonStyle.Secondary)
     : new ButtonBuilder().setCustomId('np:pause').setEmoji('⏸️').setStyle(ButtonStyle.Secondary);
@@ -193,10 +208,13 @@ function buildNowPlayingContent(record) {
     new ButtonBuilder().setCustomId('np:stop').setEmoji('⏹️').setStyle(ButtonStyle.Secondary),
     toggle,
     new ButtonBuilder().setCustomId('np:next').setEmoji('⏭️').setStyle(ButtonStyle.Secondary),
+  );
+  const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('np:voldown').setEmoji('🔉').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('np:volup').setEmoji('🔊').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('np:queue').setEmoji('📜').setStyle(ButtonStyle.Secondary),
   );
-  return { embeds: [embed], components: [row] };
+  return { embeds: [buildNowPlayingEmbed(record)], components: [row, row2] };
 }
 
 async function updateNowPlaying(record) {
@@ -257,6 +275,9 @@ async function handleNowPlayingButton(interaction) {
     case 'next':
       record.session.skip();
       await interaction.deferUpdate().catch(() => {});
+      return;
+    case 'queue':
+      await interaction.update(buildNowPlayingContent(record)).catch(() => {});
       return;
     case 'pause':
       record.session.pause();

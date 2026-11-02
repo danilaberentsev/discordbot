@@ -53,10 +53,21 @@ export class VoiceListener {
     this.handleStop = null;
   }
 
+  findMember(userId) {
+    return this.guild?.voiceStates?.cache?.get(userId)?.member
+      ?? this.guild?.members?.cache?.get(userId)
+      ?? null;
+  }
+
   resolveName(userId) {
-    const member = this.guild?.voiceStates?.cache?.get(userId)?.member
-      ?? this.guild?.members?.cache?.get(userId);
-    return member?.displayName ?? userId;
+    return this.findMember(userId)?.displayName ?? userId;
+  }
+
+  // боты в канале не должны запускать распознавание: их музыка/озвучка
+  // иначе принимается за речь и жжёт STT
+  isBot(userId) {
+    if (userId === this.botId) return true;
+    return this.findMember(userId)?.user?.bot === true;
   }
 
   isRecording() {
@@ -86,7 +97,7 @@ export class VoiceListener {
   }
 
   beginUser(userId) {
-    if (userId === this.botId || this.users.has(userId)) return;
+    if (this.users.has(userId) || this.isBot(userId)) return;
     const entry = {
       sub: null, dec: null, recognizer: null, chunks: [], bytes: 0, startedAt: Date.now(), wakeFired: false,
     };

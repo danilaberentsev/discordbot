@@ -359,6 +359,7 @@ export class VoiceSession {
     this.startToken++;
     this.queue = [];
     this.waveRefill = null;
+    this.current = null;
     clearTimeout(this.duckTimer);
     try {
       this.player.stop(true);

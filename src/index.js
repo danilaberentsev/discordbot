@@ -156,10 +156,21 @@ function getSession(guild, channel, textChannelId) {
     duckRelease: null,
     textChannelId: textChannelId ?? null,
     nowPlayingMessage: null,
+    statusChannelId: null,
+    statusText: null,
+    statusBusy: false,
+    statusDirty: false,
+    statusBroken: false,
   };
   sessions.set(guild.id, record);
-  session.onTrackStart = () => updateNowPlaying(record);
-  session.onIdle = () => updateNowPlaying(record);
+  session.onTrackStart = () => {
+    updateNowPlaying(record);
+    syncVoiceStatus(record);
+  };
+  session.onIdle = () => {
+    updateNowPlaying(record);
+    syncVoiceStatus(record);
+  };
   speakUma(record.session, JOIN_GREETING);
   return record;
 }
@@ -174,6 +185,7 @@ function destroySession(guildId) {
   } catch (err) {
     console.error('session.destroy:', err.message);
   }
+  syncVoiceStatus(record);
   try {
     record.listener.stop();
   } catch (err) {
@@ -192,6 +204,7 @@ function destroySession(guildId) {
 function moveSession(record, channel) {
   record.connection.rejoin({ channelId: channel.id, selfDeaf: false, selfMute: false });
   console.log(`Перехожу в «${channel.name}»`);
+  syncVoiceStatus(record);
 }
 
 const QUEUE_LIMIT = 15;
@@ -246,6 +259,75 @@ function buildNowPlayingContent(record) {
     new ButtonBuilder().setCustomId('np:queue').setEmoji('📜').setStyle(ButtonStyle.Secondary),
   );
   return { embeds: [buildNowPlayingEmbed(record)], components: [row, row2] };
+}
+
+const VOICE_STATUS_MAX = 500;
+
+function voiceChannelOf(record) {
+  const channelId = record.connection.joinConfig.channelId;
+  if (!channelId) return null;
+  const channel = client.channels.cache.get(channelId);
+  return channel?.type === ChannelType.GuildVoice ? channel : null;
+}
+
+// статус голосового канала: «🔊 исполнитель — трек», пока музыка играет
+async function applyVoiceStatus(record) {
+  const channel = voiceChannelOf(record);
+  const current = record.session.current?.kind === 'track' ? record.session.current : null;
+  const status = current
+    ? Array.from(`🔊 ${trackLabel(current)}`).slice(0, VOICE_STATUS_MAX).join('')
+    : null;
+
+  // бот сменил канал (автопереход) — со старого канала статус снимаем
+  if (record.statusChannelId && record.statusChannelId !== channel?.id) {
+    const previousId = record.statusChannelId;
+    record.statusChannelId = null;
+    record.statusText = null;
+    try {
+      await client.rest.put(Routes.channelVoiceStatus(previousId), { body: { status: null } });
+    } catch {
+    }
+  }
+
+  if (!channel) return;
+  if (record.statusChannelId === channel.id && record.statusText === status) return;
+  // чужой статус канала не трогаем, пока показывать нечего
+  if (!status && record.statusText === null) return;
+
+  record.statusChannelId = channel.id;
+  record.statusText = status;
+  try {
+    await client.rest.put(Routes.channelVoiceStatus(channel.id), { body: { status } });
+  } catch (err) {
+    record.statusChannelId = null;
+    record.statusText = null;
+    if (err.status === 403) {
+      record.statusBroken = true;
+      console.error('Статус канала: нет прав на изменение статуса голосового канала');
+    } else {
+      console.error('Статус канала:', err.message);
+    }
+  }
+}
+
+// запросы статуса идут по одному: переключение треков не должно гонять их наперегонки
+function syncVoiceStatus(record) {
+  if (record.statusBroken) return;
+  record.statusDirty = true;
+  if (record.statusBusy) return;
+  record.statusBusy = true;
+  void (async () => {
+    try {
+      while (record.statusDirty) {
+        record.statusDirty = false;
+        await applyVoiceStatus(record);
+      }
+    } catch (err) {
+      console.error('Статус канала:', err.message);
+    } finally {
+      record.statusBusy = false;
+    }
+  })();
 }
 
 async function updateNowPlaying(record) {

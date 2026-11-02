@@ -145,12 +145,11 @@ async function startPicked(session, music, picked) {
   const label = picked.artists ? `${picked.artists} — ${picked.title}` : picked.title;
   const item = trackItem(picked, music);
   if (session.current?.kind === 'track') {
-    // музыка уже играет — добавляем в очередь и объявляем сразу (с прерыванием)
+    // музыка уже играет — ставим сразу после текущего трека и объявляем (с прерыванием)
     const announce = picked.artists
       ? `Добавляю ${picked.artists}, ${picked.title} следующим`
       : `Добавляю ${picked.title} следующим`;
-    if (session.waveRefill) session.playNext(item);
-    else await session.playTrack(item);
+    session.playNext(item);
     await speakUma(session, announce);
   } else {
     // ничего не играет — announce сыграет прямо перед треком

@@ -574,6 +574,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           return;
         }
         await interaction.deferReply();
+        const question = `> ${query}`;
         try {
           const answer = await assistant.ask(interaction.user.id, query);
           const text = answer?.trim() || 'Что-то я не поняла, попробуй иначе';
@@ -582,10 +583,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             record.listeningUntil = 0;
             await speakUma(record.session, text);
           }
-          await interaction.editReply(text);
+          await interaction.editReply(`${question}\n\n${text}`);
         } catch (err) {
           console.error('Ассистент (ask):', err.message);
-          await interaction.editReply('Что-то пошло не так');
+          await interaction.editReply(`${question}\n\nЧто-то пошло не так`);
         }
         break;
       }

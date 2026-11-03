@@ -30,7 +30,17 @@ const client = new Client({
 
 const sessions = new Map();
 const assistant = config.deepseekApiKey
-  ? new Assistant({ apiKey: config.deepseekApiKey })
+  ? new Assistant(
+      { apiKey: config.deepseekApiKey },
+      (userId) => {
+        // ник в гильдии предпочтительнее, иначе глобальное имя пользователя
+        const member = client.guilds.cache
+          .map((g) => g.members.cache.get(userId))
+          .find((m) => m);
+        const user = client.users.cache.get(userId);
+        return member?.displayName || user?.displayName || user?.username || null;
+      },
+    )
   : null;
 const LISTEN_WINDOW_MS = 8000;
 const FOLLOWUP_WINDOW_MS = 3000;

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gladia STT — тест</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #11171f;
+      --panel-2: #161d27;
+      --border: #232c38;
+      --text: #e6edf3;
+      --muted: #8b98a5;
+      --accent: #7c5cff;
+      --accent-2: #4ade80;
+      --danger: #f87171;
+      --warn: #fbbf24;
+      --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      min-height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      z-index: 5;
+    }
+    header h1 { font-size: 18px; margin: 0; font-weight: 650; }
+    header .sub { color: var(--muted); font-size: 13px; }
+
+    .status-pill {
+      margin-left: auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .status-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+    .status-pill.connected { color: var(--accent-2); border-color: rgba(74, 222, 128, 0.35); }
+    .status-pill.connected .dot { background: var(--accent-2); box-shadow: 0 0 8px var(--accent-2); }
+    .status-pill.recording { color: var(--danger); border-color: rgba(248, 113, 113, 0.4); }
+    .status-pill.recording .dot { background: var(--danger); animation: pulse 1s infinite; }
+    .status-pill.busy { color: var(--warn); border-color: rgba(251, 191, 36, 0.35); }
+    .status-pill.busy .dot { background: var(--warn); animation: pulse 1s infinite; }
+
+    @keyframes pulse { 50% { opacity: 0.3; } }
+
+    .info-bar {
+      padding: 10px 24px;
+      font-size: 12.5px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+    }
+
+    main {
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .controls { display: flex; align-items: center; gap: 12px; }
+    .controls .spacer { flex: 1; }
+    .controls label { font-size: 12.5px; color: var(--muted); }
+    .controls select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .record-btn {
+      flex: none;
+      padding: 14px 22px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 650;
+      cursor: pointer;
+      color: #fff;
+      background: var(--accent);
+      transition: transform 0.06s ease, background 0.15s ease;
+    }
+    .record-btn:hover { filter: brightness(1.08); }
+    .record-btn:active { transform: scale(0.985); }
+    .record-btn.recording { background: var(--danger); }
+    .record-btn:disabled { background: #2a3442; color: #6b7886; cursor: not-allowed; }
+
+    .section { margin-top: 22px; }
+    .section-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+
+    .partial {
+      font-family: var(--mono);
+      font-size: 15px;
+      color: var(--muted);
+      min-height: 24px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      transition: color 0.2s;
+    }
+    .partial.active { color: var(--text); }
+
+    .final {
+      font-family: var(--mono);
+      font-size: 18px;
+      padding: 14px 16px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      min-height: 52px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .final.empty { color: var(--muted); font-style: italic; }
+
+    audio { width: 100%; margin-top: 4px; }
+    .meta { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+
+    .error {
+      display: none;
+      margin-top: 18px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.35);
+      color: var(--danger);
+      font-size: 13px;
+      white-space: pre-wrap;
+    }
+    .error.show { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Gladia STT тест</h1>
+    <span class="sub">микрофон → PCM 48k → Gladia live</span>
+    <span class="status-pill" id="status"><span class="dot"></span><span id="statusText">Подключение…</span></span>
+  </header>
+
+  <div class="info-bar" id="info">Gladia: …</div>
+
+  <main class="panel">
+    <div class="controls">
+      <button class="record-btn" id="recordBtn" disabled>Начать запись</button>
+      <span class="spacer"></span>
+      <label for="langMode">Язык</label>
+      <select id="langMode">
+        <option value="ru">RU</option>
+        <option value="ru-en" selected>RU + EN</option>
+      </select>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Распознавание в реальном времени (partial)</div>
+      <div class="partial" id="partial">—</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Итоговый текст (final)</div>
+      <div class="final empty" id="final">Скажите что-нибудь…</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Записанное аудио</div>
+      <audio id="playback" controls hidden></audio>
+      <div class="meta" id="meta"></div>
+    </div>
+
+    <div class="error" id="error"></div>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    let ws = null;
+    let wsReady = false;
+    let recording = false;
+
+    let audioCtx = null;
+    let micStream = null;
+    let workletNode = null;
+    let sourceNode = null;
+    let pcmChunks = [];
+    let totalSamples = 0;
+    let actualSampleRate = 48000;
+
+    // ---------- WebSocket ----------
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+      ws = new WebSocket(proto + location.host);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        wsReady = true;
+        setStatus('connected', 'Подключено');
+        $('recordBtn').disabled = false;
+      };
+      ws.onclose = () => {
+        wsReady = false;
+        if (recording) stopRecording();
+        setStatus('', 'Отключено — переподключение…');
+        $('recordBtn').disabled = true;
+        setTimeout(connect, 1500);
+      };
+      ws.onmessage = (e) => {
+        try { handleMessage(JSON.parse(e.data)); } catch (err) { console.error(err); }
+      };
+    }
+
+    function wsSend(obj) {
+      if (wsReady) ws.send(JSON.stringify(obj));
+    }
+
+    function setStatus(cls, text) {
+      $('status').className = 'status-pill ' + cls;
+      $('statusText').textContent = text;
+    }
+
+    // ---------- Recording ----------
+    async function toggleRecord() {
+      if (recording) await stopRecording();
+      else await startRecording();
+    }
+
+    async function startRecording() {
+      if (!wsReady) return;
+      resetUi();
+
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        });
+      } catch (err) {
+        showError('Нет доступа к микрофону: ' + err.message);
+        return;
+      }
+
+      audioCtx = new AudioContext({ sampleRate: 48000 });
+      actualSampleRate = audioCtx.sampleRate;
+
+      try {
+        await audioCtx.audioWorklet.addModule('/recorder-worklet.js');
+      } catch (err) {
+        showError('AudioWorklet недоступен: ' + err.message);
+        await releaseMic();
+        return;
+      }
+
+      sourceNode = audioCtx.createMediaStreamSource(micStream);
+      workletNode = new AudioWorkletNode(audioCtx, 'recorder-processor');
+      workletNode.port.onmessage = (e) => onPcm(e.data);
+      sourceNode.connect(workletNode);
+
+      pcmChunks = [];
+      totalSamples = 0;
+      recording = true;
+      setRecordingUi(true);
+      wsSend({ type: 'start', sampleRate: actualSampleRate, langMode: $('langMode').value });
+    }
+
+    function onPcm(float32) {
+      const int16 = floatTo16(float32);
+      pcmChunks.push(int16);
+      totalSamples += int16.length;
+      if (wsReady) ws.send(int16.buffer);
+    }
+
+    async function stopRecording() {
+      if (!recording) return;
+      recording = false;
+      setRecordingUi(false);
+      setStatus('busy', 'Останавливаю…');
+
+      try { workletNode?.disconnect(); } catch {}
+      try { sourceNode?.disconnect(); } catch {}
+      try { micStream?.getTracks().forEach((t) => t.stop()); } catch {}
+      try { await audioCtx?.close(); } catch {}
+      workletNode = sourceNode = micStream = null;
+      audioCtx = null;
+
+      if (totalSamples > 0) {
+        const wav = buildWav(pcmChunks, totalSamples, actualSampleRate);
+        const audio = $('playback');
+        if (audio.src) URL.revokeObjectURL(audio.src);
+        audio.src = URL.createObjectURL(new Blob([wav], { type: 'audio/wav' }));
+        audio.hidden = false;
+        $('meta').textContent = `Длительность: ${(totalSamples / actualSampleRate).toFixed(1)} с · ${actualSampleRate} Гц`;
+      }
+
+      wsSend({ type: 'stop' });
+      $('recordBtn').disabled = true;
+    }
+
+    async function releaseMic() {
+      try { micStream?.getTracks().forEach((t) => t.stop()); } catch {}
+      try { await audioCtx?.close(); } catch {}
+      micStream = null;
+      audioCtx = null;
+    }
+
+    function setRecordingUi(on) {
+      const btn = $('recordBtn');
+      btn.textContent = on ? '⏹ Остановить' : 'Начать запись';
+      btn.classList.toggle('recording', on);
+      btn.disabled = !wsReady || (!on && recording);
+      if (on) setStatus('recording', 'Идёт запись');
+    }
+
+    function floatTo16(float32) {
+      const out = new Int16Array(float32.length);
+      for (let i = 0; i < float32.length; i++) {
+        const s = Math.max(-1, Math.min(1, float32[i]));
+        out[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      return out;
+    }
+
+    function writeString(view, offset, str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    }
+
+    function buildWav(chunks, totalSamples, sampleRate) {
+      const buffer = new ArrayBuffer(44 + totalSamples * 2);
+      const view = new DataView(buffer);
+      writeString(view, 0, 'RIFF');
+      view.setUint32(4, 36 + totalSamples * 2, true);
+      writeString(view, 8, 'WAVE');
+      writeString(view, 12, 'fmt ');
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeString(view, 36, 'data');
+      view.setUint32(40, totalSamples * 2, true);
+      let offset = 44;
+      for (const chunk of chunks) {
+        new Int16Array(buffer, offset, chunk.length).set(chunk);
+        offset += chunk.length * 2;
+      }
+      return buffer;
+    }
+
+    // ---------- Incoming messages ----------
+    function handleMessage(msg) {
+      switch (msg.type) {
+        case 'started':
+          $('info').textContent =
+            `Модель: ${msg.model} · ${msg.sampleRate} Гц · языки: ${(msg.languages ?? []).join(' + ')}`;
+          if (recording) setStatus('recording', 'Идёт запись');
+          break;
+        case 'partial':
+          $('partial').textContent = msg.text || '—';
+          $('partial').classList.toggle('active', !!msg.text);
+          break;
+        case 'final':
+          if (msg.text) {
+            $('final').textContent = msg.text;
+            $('final').classList.remove('empty');
+            $('partial').textContent = msg.text;
+            $('partial').classList.add('active');
+          }
+          break;
+        case 'speech':
+          $('partial').textContent = msg.active ? '…' : $('partial').textContent;
+          break;
+        case 'stopping':
+          setStatus('busy', 'Завершаю распознавание…');
+          break;
+        case 'done':
+          if (msg.text) {
+            $('final').textContent = msg.text;
+            $('final').classList.remove('empty');
+          } else if (!recording) {
+            $('final').textContent = 'Ничего не распознано';
+            $('final').classList.add('empty');
+          }
+          $('recordBtn').disabled = !wsReady;
+          setStatus(wsReady ? 'connected' : '', wsReady ? 'Подключено' : 'Отключено');
+          break;
+        case 'error':
+          showError(msg.message);
+          $('recordBtn').disabled = !wsReady;
+          setStatus(wsReady ? 'connected' : '', wsReady ? 'Подключено' : 'Отключено');
+          break;
+      }
+    }
+
+    function resetUi() {
+      $('partial').textContent = '—';
+      $('partial').classList.remove('active');
+      $('final').textContent = 'Слушаю…';
+      $('final').classList.add('empty');
+      $('meta').textContent = '';
+      $('error').classList.remove('show');
+      $('recordBtn').disabled = false;
+    }
+
+    function showError(message) {
+      const el = $('error');
+      el.textContent = message;
+      el.classList.add('show');
+    }
+
+    $('recordBtn').addEventListener('click', toggleRecord);
+    connect();
+  </script>
+</body>
+</html>
